@@ -1,0 +1,5 @@
+id,trigger,conditions,script,text,options,notes
+tih_commandSF_tradeOpt,Nex_CommandSFOptions,!$entity.tih_trading,"SetTooltip nex_commandSF_autoTrade ""The fleet will automatically trade commodities between markets for profit. Credits go directly to you.""",,7:nex_commandSF_autoTrade:Auto-trade,
+tih_commandSF_tradeOptActive,Nex_CommandSFOptions,$entity.tih_trading,"SetTooltip nex_commandSF_stopTrade ""Stop auto-trading and return the fleet to normal operations.""",,7:nex_commandSF_stopTrade:Stop auto-trading,
+tih_commandSF_trade,DialogOptionSelected,$option == nex_commandSF_autoTrade,TIH_TradeCommands startTrade,,,
+tih_commandSF_stopTrade,DialogOptionSelected,$option == nex_commandSF_stopTrade,TIH_TradeCommands stopTrade,,,

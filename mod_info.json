@@ -1,0 +1,13 @@
+{
+    "id": "the_invisible_hand",
+    "name": "The Invisible Hand",
+    "version": {"major": 0, "minor": 1, "patch": 0},
+    "description": "Auto-trading for Nexerelin special task groups",
+    "gameVersion": "0.98a-RC8",
+    "jars": ["jars/TheInvisibleHand.jar"],
+    "modPlugin": "theinvisiblehand.InvisibleHandModPlugin",
+    "dependencies": [
+        {"id": "nexerelin", "name": "Nexerelin"},
+        {"id": "lw_lazylib", "name": "LazyLib"}
+    ]
+}

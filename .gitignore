@@ -1,0 +1,9 @@
+/.gradle/
+/build/
+/out/
+/jars/
+/dist/
+*.iml
+/.idea/
+.serena/
+bin/
