@@ -4,6 +4,7 @@ import com.fs.starfarer.api.EveryFrameScript
 import com.fs.starfarer.api.Global
 import com.fs.starfarer.api.campaign.CampaignFleetAPI
 import com.fs.starfarer.api.campaign.FleetAssignment
+import com.fs.starfarer.api.campaign.SectorEntityToken
 import com.fs.starfarer.api.impl.campaign.ids.MemFlags
 import com.fs.starfarer.api.impl.campaign.intel.MessageIntel
 import com.fs.starfarer.api.util.IntervalUtil
@@ -110,7 +111,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         )
         state = TradeState.TRAVELING_TO_BUY
         saveStateToMemory()
-        updateTaskText("Auto-trading: buying $commodityName at ${route.source.name}")
+        updateTaskText(
+            "Auto-trading: buying $commodityName at ${route.source.name}",
+            from = fleet,
+            to = sourceEntity
+        )
     }
 
     private fun checkArrival(nextState: TradeState) {
@@ -175,7 +180,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         sendTradeNotification(
             "${fleet.name}: bought ${route.quantity} $commodityName",
             "at ${route.source.name} for ${Misc.getDGSCredits(buyPrice)}",
-            "ui_cargo_default"
+            "ui_intel_log_update"
         )
 
         // Travel to destination
@@ -187,7 +192,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         )
         state = TradeState.TRAVELING_TO_SELL
         saveStateToMemory()
-        updateTaskText("Auto-trading: selling $commodityName at ${route.dest.name}")
+        updateTaskText(
+            "Auto-trading: selling $commodityName at ${route.dest.name}",
+            from = route.source.primaryEntity,
+            to = destEntity
+        )
     }
 
     private fun sell() {
@@ -229,7 +238,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         sendTradeNotification(
             "${fleet.name}: sold ${sellQty.toInt()} $commodityName",
             "at ${route.dest.name} for ${Misc.getDGSCredits(sellPrice)} (profit: ${Misc.getDGSCredits(profit)})",
-            "ui_intel_monthly_income_positive"
+            "ui_intel_log_update"
         )
 
         // Back to evaluating for next trade
@@ -289,11 +298,17 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         Global.getSector().campaignUI.addMessage(intel)
     }
 
-    private fun updateTaskText(text: String) {
+    private fun updateTaskText(text: String, from: SectorEntityToken? = null, to: SectorEntityToken? = null) {
         val sf = SpecialForcesIntel.getIntelFromMemory(fleet) ?: return
         val task = sf.routeAI?.currentTask
         if (task is AutoTradeTask) {
             task.tradeActionText = text
+        }
+        // Update route segment so the intel panel shows correct from/to
+        val segment = sf.route?.current
+        if (segment != null) {
+            if (from != null) segment.from = from
+            if (to != null) segment.to = to
         }
     }
 }
