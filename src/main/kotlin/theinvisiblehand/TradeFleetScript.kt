@@ -20,11 +20,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_SOURCE_MARKET = "\$tih_trade_source"
         const val MEM_KEY_DEST_MARKET = "\$tih_trade_dest"
         const val MEM_KEY_TOTAL_PROFIT = "\$tih_trade_total_profit"
+        const val MEM_KEY_BUY_COST = "\$tih_trade_buy_cost"
 
         private const val TRADE_MOD_ID = "tih_trade"
         private const val TRADE_MOD_DAYS = 30f
         private const val ARRIVAL_DISTANCE = 300f
-        private const val ICON_PATH = "graphics/icons/trade.png"
     }
 
     enum class TradeState {
@@ -148,7 +148,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
 
         val playerCredits = Global.getSector().playerFleet.cargo.credits
-        val buyPrice = route.source.getSupplyPrice(route.commodityId, route.quantity.toDouble(), false)
+        val buyPrice = route.source.getSupplyPrice(route.commodityId, route.quantity.toDouble(), true)
 
         if (playerCredits.get() < buyPrice) {
             // Can't afford - re-evaluate
@@ -161,6 +161,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         // Execute purchase
         playerCredits.subtract(buyPrice)
         fleet.cargo.addCommodity(route.commodityId, route.quantity.toFloat())
+
+        // Store buy cost for profit calculation on sell
+        fleet.memoryWithoutUpdate.set(MEM_KEY_BUY_COST, buyPrice)
 
         // Market economic impact
         val comData = route.source.getCommodityData(route.commodityId)
@@ -203,7 +206,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
 
         val sellQty = actualQty.coerceAtMost(route.quantity.toFloat())
-        val sellPrice = route.dest.getDemandPrice(route.commodityId, sellQty.toDouble(), false)
+        val sellPrice = route.dest.getDemandPrice(route.commodityId, sellQty.toDouble(), true)
 
         // Execute sale
         fleet.cargo.removeCommodity(route.commodityId, sellQty)
@@ -213,16 +216,19 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val comData = route.dest.getCommodityData(route.commodityId)
         comData.addTradeModPlus(TRADE_MOD_ID, sellQty, TRADE_MOD_DAYS)
 
-        // Track total profit
-        val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT) + sellPrice
+        // Compute actual profit (sell - buy)
+        val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
+        val profit = sellPrice - buyCost
+        val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT) + profit
         fleet.memoryWithoutUpdate.set(MEM_KEY_TOTAL_PROFIT, totalProfit)
+        fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
 
         val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
 
         // Notify player
         sendTradeNotification(
             "${fleet.name}: sold ${sellQty.toInt()} $commodityName",
-            "at ${route.dest.name} for ${Misc.getDGSCredits(sellPrice)}",
+            "at ${route.dest.name} for ${Misc.getDGSCredits(sellPrice)} (profit: ${Misc.getDGSCredits(profit)})",
             "ui_intel_monthly_income_positive"
         )
 
@@ -271,13 +277,14 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.unset(MEM_KEY_QUANTITY)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_SOURCE_MARKET)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_DEST_MARKET)
+        fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
         fleet.memoryWithoutUpdate.unset(MemFlags.FLEET_BUSY)
     }
 
     private fun sendTradeNotification(title: String, detail: String, soundId: String) {
         val intel = MessageIntel(title, Misc.getBasePlayerColor())
         intel.addLine(detail, Misc.getTextColor())
-        intel.icon = ICON_PATH
+        intel.icon = InvisibleHandModPlugin.ICON_PATH
         intel.sound = soundId
         Global.getSector().campaignUI.addMessage(intel)
     }

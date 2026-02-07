@@ -5,6 +5,14 @@ import com.fs.starfarer.api.Global
 
 class InvisibleHandModPlugin : BaseModPlugin() {
 
+    companion object {
+        const val ICON_PATH = "graphics/icons/trade.png"
+    }
+
+    override fun onApplicationLoad() {
+        Global.getSettings().loadTexture(ICON_PATH)
+    }
+
     override fun onGameLoad(newGame: Boolean) {
         // Re-attach TradeFleetScript to any fleets that were trading when saved
         for (location in Global.getSector().allLocations) {
