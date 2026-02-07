@@ -1,0 +1,160 @@
+package theinvisiblehand
+
+import com.fs.starfarer.api.Global
+import com.fs.starfarer.api.campaign.CampaignFleetAPI
+import com.fs.starfarer.api.campaign.comm.IntelInfoPlugin
+import com.fs.starfarer.api.impl.campaign.intel.BaseIntelPlugin
+import com.fs.starfarer.api.ui.Alignment
+import com.fs.starfarer.api.ui.SectorMapAPI
+import com.fs.starfarer.api.ui.TooltipMakerAPI
+import com.fs.starfarer.api.util.Misc
+
+class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
+
+    companion object {
+        private const val MEM_KEY_INTEL = "\$tih_intel"
+        private const val MEM_KEY_TRADES_COMPLETED = "\$tih_trades_completed"
+        private const val MEM_KEY_BEST_ROUTE_PROFIT = "\$tih_best_route_profit"
+        private const val MEM_KEY_BEST_ROUTE_DESC = "\$tih_best_route_desc"
+
+        fun getOrCreate(fleet: CampaignFleetAPI): AutoTradeIntel {
+            val existing = fleet.memoryWithoutUpdate.get(MEM_KEY_INTEL)
+            if (existing is AutoTradeIntel) return existing
+
+            val intel = AutoTradeIntel(fleet)
+            fleet.memoryWithoutUpdate.set(MEM_KEY_INTEL, intel)
+            return intel
+        }
+
+        fun remove(fleet: CampaignFleetAPI) {
+            val intel = fleet.memoryWithoutUpdate.get(MEM_KEY_INTEL) as? AutoTradeIntel
+            intel?.endAfterDelay()
+            fleet.memoryWithoutUpdate.unset(MEM_KEY_INTEL)
+        }
+    }
+
+    init {
+        isImportant = false
+    }
+
+    override fun getName(): String {
+        return "${fleet.name}: Auto-Trading"
+    }
+
+    override fun createSmallDescription(info: TooltipMakerAPI, width: Float, height: Float) {
+        val h = Misc.getHighlightColor()
+        val tc = Misc.getTextColor()
+        val pad = 10f
+
+        // Fleet info
+        info.addPara("Fleet: ${fleet.name}", pad)
+        info.addSectionHeading("Statistics", fleet.faction.baseUIColor, fleet.faction.darkUIColor, Alignment.MID, pad)
+
+        // Total profit
+        val totalProfit = fleet.memoryWithoutUpdate.getFloat(TradeFleetScript.MEM_KEY_TOTAL_PROFIT)
+        info.addPara("Total profit: %s", pad, h, Misc.getDGSCredits(totalProfit))
+
+        // Trades completed
+        val tradesCompleted = fleet.memoryWithoutUpdate.getInt(MEM_KEY_TRADES_COMPLETED)
+        info.addPara("Trades completed: %s", 3f, h, tradesCompleted.toString())
+
+        // Best route
+        val bestRouteProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BEST_ROUTE_PROFIT)
+        val bestRouteDesc = fleet.memoryWithoutUpdate.getString(MEM_KEY_BEST_ROUTE_DESC)
+        if (bestRouteProfit > 0f && bestRouteDesc != null) {
+            info.addPara("Best route: %s (%s profit)", 3f, h, bestRouteDesc, Misc.getDGSCredits(bestRouteProfit))
+        }
+
+        // Current status
+        info.addSectionHeading("Current Status", fleet.faction.baseUIColor, fleet.faction.darkUIColor, Alignment.MID, pad)
+        val state = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_STATE)
+        if (state != null) {
+            val stateText = when (state) {
+                "EVALUATING" -> "Evaluating trade routes"
+                "TRAVELING_TO_BUY" -> {
+                    val sourceMarketId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_SOURCE_MARKET)
+                    val commodityId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY)
+                    val commodityName = Global.getSector().economy.getCommoditySpec(commodityId)?.name ?: commodityId
+                    val sourceName = Global.getSector().economy.getMarket(sourceMarketId)?.name ?: "Unknown"
+                    "Traveling to buy $commodityName at $sourceName"
+                }
+                "BUYING" -> "Executing purchase"
+                "TRAVELING_TO_SELL" -> {
+                    val destMarketId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_DEST_MARKET)
+                    val commodityId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY)
+                    val commodityName = Global.getSector().economy.getCommoditySpec(commodityId)?.name ?: commodityId
+                    val destName = Global.getSector().economy.getMarket(destMarketId)?.name ?: "Unknown"
+                    "Traveling to sell $commodityName at $destName"
+                }
+                "SELLING" -> "Executing sale"
+                else -> state
+            }
+            info.addPara(stateText, tc, 3f)
+        }
+
+        // Configuration
+        info.addSectionHeading("Configuration", fleet.faction.baseUIColor, fleet.faction.darkUIColor, Alignment.MID, pad)
+        val minProfit = fleet.memoryWithoutUpdate.getFloat(TradeFleetScript.MEM_KEY_MIN_PROFIT_PER_DAY)
+            .takeIf { it > 0f } ?: TradeFleetScript.DEFAULT_MIN_PROFIT_PER_DAY
+        info.addPara("Min profit/day: %s", 3f, h, Misc.getDGSCredits(minProfit))
+
+        val commodityBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY_BLACKLIST)
+        if (!commodityBlacklist.isNullOrBlank()) {
+            info.addPara("Blacklisted commodities: %s", 3f, h, commodityBlacklist)
+        }
+
+        val marketBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_MARKET_BLACKLIST)
+        if (!marketBlacklist.isNullOrBlank()) {
+            info.addPara("Blacklisted markets: %s", 3f, h, marketBlacklist)
+        }
+    }
+
+    override fun getIcon(): String {
+        return InvisibleHandModPlugin.ICON_PATH
+    }
+
+    override fun getCommMessageSound(): String? {
+        return null // No sound for this intel
+    }
+
+    override fun shouldRemoveIntel(): Boolean {
+        // Remove if fleet no longer trading
+        return !fleet.memoryWithoutUpdate.getBoolean(TradeFleetScript.MEM_KEY_TRADING) || !fleet.isAlive
+    }
+
+    override fun getArrowData(map: SectorMapAPI?): MutableList<IntelInfoPlugin.ArrowData>? {
+        val arrows = mutableListOf<IntelInfoPlugin.ArrowData>()
+
+        // Show current route as arrows
+        val sourceMarketId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_SOURCE_MARKET)
+        val destMarketId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_DEST_MARKET)
+        val state = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_STATE)
+
+        if (sourceMarketId != null && destMarketId != null && state != null && state != "EVALUATING") {
+            val source = Global.getSector().economy.getMarket(sourceMarketId)?.primaryEntity
+            val dest = Global.getSector().economy.getMarket(destMarketId)?.primaryEntity
+
+            if (source != null && dest != null) {
+                val color = fleet.faction.baseUIColor
+                arrows.add(IntelInfoPlugin.ArrowData(10f, source, dest, color))
+            }
+        }
+
+        return if (arrows.isEmpty()) null else arrows
+    }
+
+    fun recordTrade(profit: Float, route: TradeRoute) {
+        // Increment trade count
+        val count = fleet.memoryWithoutUpdate.getInt(MEM_KEY_TRADES_COMPLETED)
+        fleet.memoryWithoutUpdate.set(MEM_KEY_TRADES_COMPLETED, count + 1)
+
+        // Update best route if this one is better
+        val bestProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BEST_ROUTE_PROFIT)
+        if (profit > bestProfit) {
+            fleet.memoryWithoutUpdate.set(MEM_KEY_BEST_ROUTE_PROFIT, profit)
+            val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
+            val desc = "$commodityName: ${route.source.name} → ${route.dest.name}"
+            fleet.memoryWithoutUpdate.set(MEM_KEY_BEST_ROUTE_DESC, desc)
+        }
+    }
+}

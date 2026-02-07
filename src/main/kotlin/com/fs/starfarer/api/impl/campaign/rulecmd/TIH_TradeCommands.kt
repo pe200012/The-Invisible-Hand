@@ -4,7 +4,9 @@ import com.fs.starfarer.api.campaign.CampaignFleetAPI
 import com.fs.starfarer.api.campaign.InteractionDialogAPI
 import com.fs.starfarer.api.campaign.rules.MemoryAPI
 import com.fs.starfarer.api.util.Misc
+import com.fs.starfarer.api.Global
 import exerelin.campaign.intel.specialforces.SpecialForcesIntel
+import theinvisiblehand.AutoTradeIntel
 import theinvisiblehand.AutoTradeTask
 import theinvisiblehand.TradeFleetScript
 
@@ -46,6 +48,10 @@ class TIH_TradeCommands : BaseCommandPlugin() {
         val script = TradeFleetScript(fleet)
         fleet.addScript(script)
 
+        // Create and add intel
+        val intel = AutoTradeIntel.getOrCreate(fleet)
+        Global.getSector().intelManager.addIntel(intel, true)
+
         dialog.textPanel.addPara("Auto-trade enabled. The fleet will now autonomously trade commodities between markets for profit.")
 
         return true
@@ -67,6 +73,9 @@ class TIH_TradeCommands : BaseCommandPlugin() {
 
         // Clear fleet assignments
         fleet.clearAssignments()
+
+        // Remove intel
+        AutoTradeIntel.remove(fleet)
 
         dialog.textPanel.addPara("Auto-trade disabled. The fleet has returned to normal operations.")
 

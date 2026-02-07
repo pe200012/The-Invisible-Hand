@@ -12,7 +12,6 @@ import kotlin.math.min
 
 object TradeRouteCalculator {
 
-    private const val MIN_PROFIT_PER_DAY = 500f
     private const val CACHE_DURATION_DAYS = 1f
 
     private var cachedMarketPrices: MutableMap<String, MarketPriceData>? = null
@@ -30,11 +29,18 @@ object TradeRouteCalculator {
         val fleetFaction = fleet.faction
         val playerCredits = Global.getSector().playerFleet.cargo.credits.get()
 
+        // Get blacklists from fleet memory
+        val commodityBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY_BLACKLIST)
+            ?.split(",")?.map { it.trim() }?.toSet() ?: emptySet()
+        val marketBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_MARKET_BLACKLIST)
+            ?.split(",")?.map { it.trim() }?.toSet() ?: emptySet()
+
         // Filter to accessible markets
         val markets = allMarkets.filter { market ->
             !market.isHidden
                     && !fleetFaction.isHostileTo(market.faction)
                     && market.hasSubmarket(Submarkets.SUBMARKET_OPEN)
+                    && market.id !in marketBlacklist
         }
 
         if (markets.size < 2) return null
@@ -43,6 +49,7 @@ object TradeRouteCalculator {
             val spec = economy.getCommoditySpec(id)
             !spec.isPersonnel && !spec.isMeta && !spec.isNonEcon
                     && !spec.hasTag("nontradeable")
+                    && id !in commodityBlacklist
         }
 
         val cargoSpace = fleet.cargo.spaceLeft
@@ -64,8 +71,12 @@ object TradeRouteCalculator {
         val cache = cachedMarketPrices ?: return null
         val fleetToken = fleet.containingLocation.createToken(fleet.location)
 
+        // Get min profit threshold from fleet memory (or use default)
+        val minProfitPerDay = fleet.memoryWithoutUpdate.getFloat(TradeFleetScript.MEM_KEY_MIN_PROFIT_PER_DAY)
+            .takeIf { it > 0f } ?: TradeFleetScript.DEFAULT_MIN_PROFIT_PER_DAY
+
         var bestRoute: TradeRoute? = null
-        var bestProfitPerDay = MIN_PROFIT_PER_DAY
+        var bestProfitPerDay = minProfitPerDay
 
         for (commodityId in commodityIds) {
             val spec = economy.getCommoditySpec(commodityId)
@@ -89,7 +100,9 @@ object TradeRouteCalculator {
                     // Calculate trade quantity
                     val maxByCargo = (cargoSpace / unitCargo).toInt()
                     val maxByCredits = if (buyPricePerUnit > 0f) (playerCredits / buyPricePerUnit).toInt() else 0
-                    val maxReasonable = 200 // Cap to avoid excessive market impact
+                    // Cap scales with market size: size 3 = 100, size 6 = 200, size 10 = 400
+                    val marketSize = min(source.size, dest.size)
+                    val maxReasonable = marketSize * 40
                     val quantity = min(min(maxByCargo, maxByCredits), maxReasonable)
                     if (quantity <= 0) continue
 

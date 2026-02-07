@@ -10,6 +10,7 @@ import com.fs.starfarer.api.impl.campaign.intel.MessageIntel
 import com.fs.starfarer.api.util.IntervalUtil
 import com.fs.starfarer.api.util.Misc
 import exerelin.campaign.intel.specialforces.SpecialForcesIntel
+import kotlin.math.min
 
 class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
@@ -22,6 +23,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_DEST_MARKET = "\$tih_trade_dest"
         const val MEM_KEY_TOTAL_PROFIT = "\$tih_trade_total_profit"
         const val MEM_KEY_BUY_COST = "\$tih_trade_buy_cost"
+        const val MEM_KEY_MIN_PROFIT_PER_DAY = "\$tih_min_profit_per_day"
+        const val MEM_KEY_COMMODITY_BLACKLIST = "\$tih_commodity_blacklist"
+        const val MEM_KEY_MARKET_BLACKLIST = "\$tih_market_blacklist"
+
+        const val DEFAULT_MIN_PROFIT_PER_DAY = 500f
 
         private const val TRADE_MOD_ID = "tih_trade"
         private const val TRADE_MOD_DAYS = 30f
@@ -176,6 +182,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
 
+        // Auto-resupply: top off supplies and fuel if running low
+        autoResupply(route.source)
+
         // Notify player
         sendTradeNotification(
             "${fleet.name}: bought ${route.quantity} $commodityName",
@@ -231,6 +240,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT) + profit
         fleet.memoryWithoutUpdate.set(MEM_KEY_TOTAL_PROFIT, totalProfit)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
+
+        // Record trade in intel
+        val intel = AutoTradeIntel.getOrCreate(fleet)
+        intel.recordTrade(profit, route)
 
         val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
 
@@ -288,6 +301,40 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.unset(MEM_KEY_DEST_MARKET)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
         fleet.memoryWithoutUpdate.unset(MemFlags.FLEET_BUSY)
+    }
+
+    private fun autoResupply(market: com.fs.starfarer.api.campaign.econ.MarketAPI) {
+        val cargo = fleet.cargo
+        val playerCredits = Global.getSector().playerFleet.cargo.credits
+
+        // Only resupply if we have a profit buffer
+        val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT)
+        if (totalProfit < 5000f) return
+
+        // Resupply supplies if below 50%
+        val maxSupplies = cargo.maxCapacity
+        val currentSupplies = cargo.supplies
+        val threshold = min(200f, maxSupplies * 0.5f)
+        if (currentSupplies < threshold) {
+            val neededSupplies = (threshold * 1.2f).coerceAtLeast(0f)
+            val supplyPrice = market.getSupplyPrice(com.fs.starfarer.api.impl.campaign.ids.Commodities.SUPPLIES, neededSupplies.toDouble(), true)
+            if (playerCredits.get() >= supplyPrice && neededSupplies > 0f) {
+                playerCredits.subtract(supplyPrice)
+                cargo.addSupplies(neededSupplies)
+            }
+        }
+
+        // Resupply fuel if below 50%
+        val maxFuel = cargo.maxFuel
+        val currentFuel = cargo.fuel
+        if (currentFuel < maxFuel * 0.5f) {
+            val neededFuel = (maxFuel * 0.75f - currentFuel).coerceAtLeast(0f)
+            val fuelPrice = market.getSupplyPrice(com.fs.starfarer.api.impl.campaign.ids.Commodities.FUEL, neededFuel.toDouble(), true)
+            if (playerCredits.get() >= fuelPrice && neededFuel > 0f) {
+                playerCredits.subtract(fuelPrice)
+                cargo.addFuel(neededFuel)
+            }
+        }
     }
 
     private fun sendTradeNotification(title: String, detail: String, soundId: String) {
