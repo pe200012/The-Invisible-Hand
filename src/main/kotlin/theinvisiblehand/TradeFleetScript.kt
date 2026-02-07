@@ -2,10 +2,13 @@ package theinvisiblehand
 
 import com.fs.starfarer.api.EveryFrameScript
 import com.fs.starfarer.api.Global
+import com.fs.starfarer.api.campaign.CargoAPI
 import com.fs.starfarer.api.campaign.CampaignFleetAPI
 import com.fs.starfarer.api.campaign.FleetAssignment
 import com.fs.starfarer.api.campaign.SectorEntityToken
+import com.fs.starfarer.api.campaign.econ.MarketAPI
 import com.fs.starfarer.api.impl.campaign.ids.MemFlags
+import com.fs.starfarer.api.impl.campaign.ids.Submarkets
 import com.fs.starfarer.api.impl.campaign.intel.MessageIntel
 import com.fs.starfarer.api.util.IntervalUtil
 import com.fs.starfarer.api.util.Misc
@@ -26,8 +29,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_MIN_PROFIT_PER_DAY = "\$tih_min_profit_per_day"
         const val MEM_KEY_COMMODITY_BLACKLIST = "\$tih_commodity_blacklist"
         const val MEM_KEY_MARKET_BLACKLIST = "\$tih_market_blacklist"
+        const val MEM_KEY_OFFLOADED = "\$tih_offloaded"
 
-        const val DEFAULT_MIN_PROFIT_PER_DAY = 500f
+        const val DEFAULT_MIN_PROFIT_PER_DAY = 100f
 
         private const val TRADE_MOD_ID = "tih_trade"
         private const val TRADE_MOD_DAYS = 30f
@@ -35,6 +39,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     }
 
     enum class TradeState {
+        OFFLOADING,
         EVALUATING,
         TRAVELING_TO_BUY,
         BUYING,
@@ -43,7 +48,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     }
 
     private val interval = IntervalUtil(0.5f, 1.0f)
-    private var state = TradeState.EVALUATING
+    private var state = TradeState.OFFLOADING
     private var currentRoute: TradeRoute? = null
 
     init {
@@ -53,12 +58,18 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             state = try {
                 TradeState.valueOf(savedState)
             } catch (_: IllegalArgumentException) {
-                TradeState.EVALUATING
+                if (fleet.memoryWithoutUpdate.getBoolean(MEM_KEY_OFFLOADED))
+                    TradeState.EVALUATING
+                else
+                    TradeState.OFFLOADING
             }
+        } else if (fleet.memoryWithoutUpdate.getBoolean(MEM_KEY_OFFLOADED)) {
+            // Fresh script but already offloaded (shouldn't normally happen, but be safe)
+            state = TradeState.EVALUATING
         }
 
         // Restore route data if mid-trade
-        if (state != TradeState.EVALUATING) {
+        if (state != TradeState.EVALUATING && state != TradeState.OFFLOADING) {
             currentRoute = restoreRouteFromMemory()
             if (currentRoute == null) {
                 state = TradeState.EVALUATING
@@ -85,6 +96,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         saveStateToMemory()
 
         when (state) {
+            TradeState.OFFLOADING -> offload()
             TradeState.EVALUATING -> evaluate()
             TradeState.TRAVELING_TO_BUY -> checkArrival(TradeState.BUYING)
             TradeState.BUYING -> buy()
@@ -100,8 +112,24 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             fleet.clearAssignments()
             fleet.addAssignment(FleetAssignment.ORBIT_PASSIVE, fleet, 2f, "Evaluating trade routes")
             updateTaskText("Auto-trading: evaluating routes")
+
+            // Debug: send one-time notification about why no route found
+            if (!fleet.memoryWithoutUpdate.getBoolean("\$tih_no_route_notified")) {
+                val minProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_MIN_PROFIT_PER_DAY)
+                    .takeIf { it > 0f } ?: DEFAULT_MIN_PROFIT_PER_DAY
+                val credits = Global.getSector().playerFleet.cargo.credits.get()
+                sendTradeNotification(
+                    "${fleet.name}: No profitable routes found",
+                    "Min profit threshold: ${Misc.getDGSCredits(minProfit)}/day, Available credits: ${Misc.getDGSCredits(credits)}. Will continue searching...",
+                    "ui_intel_log_update"
+                )
+                fleet.memoryWithoutUpdate.set("\$tih_no_route_notified", true, 5f) // Reset after 5 days
+            }
             return
         }
+
+        // Clear the notification flag when route is found
+        fleet.memoryWithoutUpdate.unset("\$tih_no_route_notified")
 
         currentRoute = route
         saveRouteToMemory(route)
@@ -300,7 +328,160 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.unset(MEM_KEY_SOURCE_MARKET)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_DEST_MARKET)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
+        fleet.memoryWithoutUpdate.unset(MEM_KEY_OFFLOADED)
         fleet.memoryWithoutUpdate.unset(MemFlags.FLEET_BUSY)
+    }
+
+    private fun offload() {
+        // If already offloaded (from save/load), skip
+        if (fleet.memoryWithoutUpdate.getBoolean(MEM_KEY_OFFLOADED)) {
+            state = TradeState.EVALUATING
+            saveStateToMemory()
+            return
+        }
+
+        // Check if fleet has anything to offload
+        if (!hasCargoToOffload()) {
+            fleet.memoryWithoutUpdate.set(MEM_KEY_OFFLOADED, true)
+            state = TradeState.EVALUATING
+            saveStateToMemory()
+            return
+        }
+
+        // Find nearest accessible market
+        val market = findNearestAccessibleMarket()
+        if (market == null) {
+            // No market found - skip offloading, go to EVALUATING
+            fleet.memoryWithoutUpdate.set(MEM_KEY_OFFLOADED, true)
+            state = TradeState.EVALUATING
+            saveStateToMemory()
+            return
+        }
+
+        val entity = market.primaryEntity
+        val dist = Misc.getDistance(fleet.location, entity.location)
+
+        if (fleet.containingLocation == entity.containingLocation && dist < ARRIVAL_DISTANCE * 3) {
+            // Already at market — execute offload
+            executeOffload(market)
+            fleet.memoryWithoutUpdate.set(MEM_KEY_OFFLOADED, true)
+            state = TradeState.EVALUATING
+            saveStateToMemory()
+            updateTaskText("Auto-trading: evaluating routes")
+        } else {
+            // Travel to market
+            fleet.clearAssignments()
+            fleet.addAssignment(
+                FleetAssignment.GO_TO_LOCATION, entity, 999f,
+                "Traveling to offload cargo at ${market.name}"
+            )
+            updateTaskText("Auto-trading: offloading cargo at ${market.name}", to = entity)
+        }
+    }
+
+    private fun hasCargoToOffload(): Boolean {
+        val cargo = fleet.cargo
+        for (stack in cargo.stacksCopy) {
+            if (stack.isSupplyStack || stack.isFuelStack) continue
+            if (stack.size > 0) return true
+        }
+        return false
+    }
+
+    private fun findNearestAccessibleMarket(): MarketAPI? {
+        val allMarkets = Global.getSector().economy.marketsCopy
+        val fleetFaction = fleet.faction
+        return allMarkets
+            .filter { market ->
+                !market.isHidden
+                        && !fleetFaction.isHostileTo(market.faction)
+                        && market.hasSubmarket(Submarkets.SUBMARKET_OPEN)
+                        && market.primaryEntity != null
+            }
+            .minByOrNull { Misc.getDistanceLY(fleet, it.primaryEntity) }
+    }
+
+    private fun executeOffload(market: MarketAPI) {
+        val cargo = fleet.cargo
+        var totalSellRevenue = 0f
+
+        // 1. Sell all tradeable commodities (not supplies, not fuel)
+        for (stack in cargo.stacksCopy) {
+            if (!stack.isCommodityStack) continue
+            if (stack.isSupplyStack || stack.isFuelStack) continue
+
+            val commodityId = stack.commodityId ?: continue
+            val qty = stack.size
+            if (qty <= 0f) continue
+
+            val sellPrice = market.getDemandPrice(commodityId, qty.toDouble(), true)
+            cargo.removeCommodity(commodityId, qty)
+            Global.getSector().playerFleet.cargo.credits.add(sellPrice)
+            totalSellRevenue += sellPrice
+
+            // Market economic impact
+            market.getCommodityData(commodityId)
+                .addTradeModPlus(TRADE_MOD_ID, qty, TRADE_MOD_DAYS)
+        }
+
+        // 2. Transfer valuable items (weapons, fighters, hullmods, specials) to storage
+        val storageCargo = findStorageCargo(market)
+        if (storageCargo != null) {
+            transferValuableItems(cargo, storageCargo)
+        } else {
+            // Fallback: transfer to player fleet cargo
+            val playerCargo = Global.getSector().playerFleet.cargo
+            transferValuableItems(cargo, playerCargo)
+        }
+
+        cargo.removeEmptyStacks()
+
+        // Notify player
+        if (totalSellRevenue > 0f) {
+            sendTradeNotification(
+                "${fleet.name}: offloaded cargo",
+                "Sold commodities for ${Misc.getDGSCredits(totalSellRevenue)} at ${market.name}",
+                "ui_intel_log_update"
+            )
+        }
+    }
+
+    private fun transferValuableItems(from: CargoAPI, to: CargoAPI) {
+        for (stack in from.stacksCopy) {
+            if (stack.isWeaponStack) {
+                val weaponId = stack.data as? String ?: continue
+                val count = stack.size.toInt()
+                to.addWeapons(weaponId, count)
+                from.removeWeapons(weaponId, count)
+            } else if (stack.isFighterWingStack) {
+                val wingId = stack.data as? String ?: continue
+                val count = stack.size.toInt()
+                to.addFighters(wingId, count)
+                from.removeFighters(wingId, count)
+            } else if (stack.isSpecialStack) {
+                val specialData = stack.specialDataIfSpecial ?: continue
+                val qty = stack.size
+                to.addSpecial(specialData, qty)
+                from.removeItems(CargoAPI.CargoItemType.SPECIAL, specialData, qty)
+            }
+        }
+    }
+
+    private fun findStorageCargo(market: MarketAPI): CargoAPI? {
+        // Check if this market has storage
+        if (market.hasSubmarket(Submarkets.SUBMARKET_STORAGE)) {
+            return market.getSubmarket(Submarkets.SUBMARKET_STORAGE).cargo
+        }
+        // Search for nearest market with storage
+        val allMarkets = Global.getSector().economy.marketsCopy
+        val nearestStorage = allMarkets
+            .filter { it.hasSubmarket(Submarkets.SUBMARKET_STORAGE) }
+            .filter { it.primaryEntity != null }
+            .minByOrNull { Misc.getDistanceLY(fleet, it.primaryEntity) }
+        if (nearestStorage != null) {
+            return nearestStorage.getSubmarket(Submarkets.SUBMARKET_STORAGE).cargo
+        }
+        return null
     }
 
     private fun autoResupply(market: com.fs.starfarer.api.campaign.econ.MarketAPI) {

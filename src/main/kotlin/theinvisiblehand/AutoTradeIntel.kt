@@ -70,6 +70,7 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
         val state = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_STATE)
         if (state != null) {
             val stateText = when (state) {
+                "OFFLOADING" -> "Offloading non-trade cargo"
                 "EVALUATING" -> "Evaluating trade routes"
                 "TRAVELING_TO_BUY" -> {
                     val sourceMarketId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_SOURCE_MARKET)
