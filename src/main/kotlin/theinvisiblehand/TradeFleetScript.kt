@@ -5,8 +5,10 @@ import com.fs.starfarer.api.Global
 import com.fs.starfarer.api.campaign.CampaignFleetAPI
 import com.fs.starfarer.api.campaign.FleetAssignment
 import com.fs.starfarer.api.impl.campaign.ids.MemFlags
+import com.fs.starfarer.api.impl.campaign.intel.MessageIntel
 import com.fs.starfarer.api.util.IntervalUtil
 import com.fs.starfarer.api.util.Misc
+import exerelin.campaign.intel.specialforces.SpecialForcesIntel
 
 class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
@@ -22,6 +24,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         private const val TRADE_MOD_ID = "tih_trade"
         private const val TRADE_MOD_DAYS = 30f
         private const val ARRIVAL_DISTANCE = 300f
+        private const val ICON_PATH = "graphics/icons/trade.png"
     }
 
     enum class TradeState {
@@ -89,21 +92,25 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             // No profitable route found - orbit passively and retry next interval
             fleet.clearAssignments()
             fleet.addAssignment(FleetAssignment.ORBIT_PASSIVE, fleet, 2f, "Evaluating trade routes")
+            updateTaskText("Auto-trading: evaluating routes")
             return
         }
 
         currentRoute = route
         saveRouteToMemory(route)
 
+        val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
+
         // Travel to source market
         val sourceEntity = route.source.primaryEntity
         fleet.clearAssignments()
         fleet.addAssignment(
             FleetAssignment.GO_TO_LOCATION, sourceEntity, 999f,
-            "Traveling to buy ${route.source.name}"
+            "Traveling to buy $commodityName at ${route.source.name}"
         )
         state = TradeState.TRAVELING_TO_BUY
         saveStateToMemory()
+        updateTaskText("Auto-trading: buying $commodityName at ${route.source.name}")
     }
 
     private fun checkArrival(nextState: TradeState) {
@@ -159,15 +166,25 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val comData = route.source.getCommodityData(route.commodityId)
         comData.addTradeModMinus(TRADE_MOD_ID, route.quantity.toFloat(), TRADE_MOD_DAYS)
 
+        val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
+
+        // Notify player
+        sendTradeNotification(
+            "${fleet.name}: bought ${route.quantity} $commodityName",
+            "at ${route.source.name} for ${Misc.getDGSCredits(buyPrice)}",
+            "ui_cargo_default"
+        )
+
         // Travel to destination
         val destEntity = route.dest.primaryEntity
         fleet.clearAssignments()
         fleet.addAssignment(
             FleetAssignment.GO_TO_LOCATION, destEntity, 999f,
-            "Traveling to sell at ${route.dest.name}"
+            "Traveling to sell $commodityName at ${route.dest.name}"
         )
         state = TradeState.TRAVELING_TO_SELL
         saveStateToMemory()
+        updateTaskText("Auto-trading: selling $commodityName at ${route.dest.name}")
     }
 
     private fun sell() {
@@ -200,10 +217,20 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT) + sellPrice
         fleet.memoryWithoutUpdate.set(MEM_KEY_TOTAL_PROFIT, totalProfit)
 
+        val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
+
+        // Notify player
+        sendTradeNotification(
+            "${fleet.name}: sold ${sellQty.toInt()} $commodityName",
+            "at ${route.dest.name} for ${Misc.getDGSCredits(sellPrice)}",
+            "ui_intel_monthly_income_positive"
+        )
+
         // Back to evaluating for next trade
         currentRoute = null
         state = TradeState.EVALUATING
         saveStateToMemory()
+        updateTaskText("Auto-trading: evaluating routes")
     }
 
     private fun saveStateToMemory() {
@@ -245,5 +272,21 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.unset(MEM_KEY_SOURCE_MARKET)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_DEST_MARKET)
         fleet.memoryWithoutUpdate.unset(MemFlags.FLEET_BUSY)
+    }
+
+    private fun sendTradeNotification(title: String, detail: String, soundId: String) {
+        val intel = MessageIntel(title, Misc.getBasePlayerColor())
+        intel.addLine(detail, Misc.getTextColor())
+        intel.icon = ICON_PATH
+        intel.sound = soundId
+        Global.getSector().campaignUI.addMessage(intel)
+    }
+
+    private fun updateTaskText(text: String) {
+        val sf = SpecialForcesIntel.getIntelFromMemory(fleet) ?: return
+        val task = sf.routeAI?.currentTask
+        if (task is AutoTradeTask) {
+            task.tradeActionText = text
+        }
     }
 }

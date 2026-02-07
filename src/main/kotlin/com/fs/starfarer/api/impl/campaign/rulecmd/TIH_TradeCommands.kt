@@ -5,7 +5,7 @@ import com.fs.starfarer.api.campaign.InteractionDialogAPI
 import com.fs.starfarer.api.campaign.rules.MemoryAPI
 import com.fs.starfarer.api.util.Misc
 import exerelin.campaign.intel.specialforces.SpecialForcesIntel
-import exerelin.campaign.intel.specialforces.SpecialForcesRouteAI.SpecialForcesTask
+import theinvisiblehand.AutoTradeTask
 import theinvisiblehand.TradeFleetScript
 
 class TIH_TradeCommands : BaseCommandPlugin() {
@@ -28,10 +28,11 @@ class TIH_TradeCommands : BaseCommandPlugin() {
     }
 
     private fun startTrade(dialog: InteractionDialogAPI, fleet: CampaignFleetAPI): Boolean {
-        // Set up a PATROL task with our custom flag so Nexerelin shows a meaningful status
+        // Assign an AutoTradeTask (subclass of SpecialForcesTask with PATROL type)
+        // so the Nexerelin intel panel shows "Auto-trading" instead of "patrolling"
         val sf = SpecialForcesIntel.getIntelFromMemory(fleet)
         if (sf != null) {
-            val task = SpecialForcesTask("patrol", 100f)
+            val task = AutoTradeTask(100f)
             task.playerIssued = true
             task.system = fleet.starSystem
             task.params["tih_auto_trade"] = true
