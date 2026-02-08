@@ -711,11 +711,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         if (task != null && to != null) {
             task.setEntity(to)
         }
-        // Update route segment so the intel panel shows correct from/to
-        val segment = sf.route?.current
-        if (segment != null) {
-            if (from != null) segment.from = from
-            if (to != null) segment.to = to
-        }
+        // Don't manually update route segments - causes incorrect time displays
+        // Nexerelin will handle route display based on current fleet position
     }
 }
