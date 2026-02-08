@@ -729,7 +729,18 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         if (task != null && to != null) {
             task.setEntity(to)
         }
-        // Don't manually update route segments - causes incorrect time displays
-        // Nexerelin will handle route display based on current fleet position
+        // Update route segment destinations
+        val segment = sf.route?.current
+        if (segment != null) {
+            if (from != null) segment.from = from
+            if (to != null) segment.to = to
+            // Recalculate segment days if both from and to are set
+            if (from != null && to != null) {
+                val travelDays = com.fs.starfarer.api.impl.campaign.fleets.RouteLocationCalculator.getTravelDays(from, to)
+                if (travelDays > 0) {
+                    segment.daysMax = travelDays
+                }
+            }
+        }
     }
 }
