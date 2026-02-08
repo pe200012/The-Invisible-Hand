@@ -406,7 +406,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
     private fun startDelay(days: Float, location: SectorEntityToken, actionText: String, onComplete: () -> Unit) {
         val clock = Global.getSector().clock
-        fleet.memoryWithoutUpdate.set(MEM_KEY_DELAY_UNTIL, clock.timestamp + clock.convertToDays(days))
+        // timestamp is in seconds, so convert days to seconds to add
+        val delaySeconds = days * clock.getSecondsPerDay()
+        fleet.memoryWithoutUpdate.set(MEM_KEY_DELAY_UNTIL, clock.timestamp + delaySeconds.toLong())
 
         // Store callback as a memory key flag for state restoration
         fleet.memoryWithoutUpdate.set("\$tih_delay_callback", actionText)
@@ -424,14 +426,30 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
     private fun checkDelay() {
         val delayUntil = fleet.memoryWithoutUpdate.getLong(MEM_KEY_DELAY_UNTIL)
-        val clock = Global.getSector().clock
+        if (delayUntil == 0L) {
+            // No delay set - shouldn't happen, fall back to evaluating
+            Global.getLogger(this::class.java).warn("checkDelay called but no delay timestamp set")
+            state = TradeState.EVALUATING
+            saveStateToMemory()
+            return
+        }
 
+        val clock = Global.getSector().clock
         if (clock.timestamp >= delayUntil) {
             // Delay complete - execute callback
             fleet.memoryWithoutUpdate.unset(MEM_KEY_DELAY_UNTIL)
             fleet.memoryWithoutUpdate.unset("\$tih_delay_callback")
-            delayCallback?.invoke()
+
+            val callback = delayCallback
+            if (callback == null) {
+                Global.getLogger(this::class.java).warn("Delay complete but no callback set, falling back to evaluating")
+                state = TradeState.EVALUATING
+                saveStateToMemory()
+                return
+            }
+
             delayCallback = null
+            callback.invoke()
         }
     }
 
