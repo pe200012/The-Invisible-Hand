@@ -46,7 +46,10 @@ object TradeRouteCalculator {
                     && market.id !in marketBlacklist
         }
 
-        if (markets.size < 2) return null
+        if (markets.size < 2) {
+            Global.getLogger(this::class.java).info("findBestRoute: Only ${markets.size} accessible markets found")
+            return null
+        }
 
         val commodityIds = economy.allCommodityIds.filter { id ->
             val spec = economy.getCommoditySpec(id)
@@ -72,7 +75,6 @@ object TradeRouteCalculator {
         }
 
         val cache = cachedMarketPrices ?: return null
-        val fleetToken = fleet.containingLocation.createToken(fleet.location)
 
         // Get min profit threshold from fleet memory (or use default)
         val minProfitPerDay = fleet.memoryWithoutUpdate.getFloat(TradeFleetScript.MEM_KEY_MIN_PROFIT_PER_DAY)
@@ -80,6 +82,13 @@ object TradeRouteCalculator {
 
         var bestRoute: TradeRoute? = null
         var bestProfitPerDay = minProfitPerDay
+
+        var totalChecked = 0
+        var failReasons = mutableMapOf<String, Int>()
+
+        fun logFail(reason: String) {
+            failReasons[reason] = (failReasons[reason] ?: 0) + 1
+        }
 
         for (commodityId in commodityIds) {
             val spec = economy.getCommoditySpec(commodityId)
@@ -93,12 +102,19 @@ object TradeRouteCalculator {
                 if (buyPricePerUnit <= 0f) continue
 
                 for (dest in markets) {
-                    if (source.id == dest.id) continue
+                    totalChecked++
+                    if (source.id == dest.id) {
+                        logFail("same_market")
+                        continue
+                    }
                     val destData = cache[dest.id] ?: continue
                     val sellPricePerUnit = destData.demandPrices[commodityId] ?: continue
 
                     val marginPerUnit = sellPricePerUnit - buyPricePerUnit
-                    if (marginPerUnit <= 0f) continue
+                    if (marginPerUnit <= 0f) {
+                        logFail("no_margin")
+                        continue
+                    }
 
                     // Calculate trade quantity
                     val maxByCargo = (cargoSpace / unitCargo).toInt()
@@ -107,20 +123,31 @@ object TradeRouteCalculator {
                     val marketSize = min(source.size, dest.size)
                     val maxReasonable = (marketSize * marketSize * TIHConfig.quantityScalingQuadratic) + (marketSize * TIHConfig.quantityScalingLinear)
                     val quantity = min(min(maxByCargo, maxByCredits), maxReasonable)
-                    if (quantity <= 0) continue
+                    if (quantity <= 0) {
+                        if (maxByCargo == 0) logFail("no_quantity_cargo_full")
+                        else if (maxByCredits == 0) logFail("no_quantity_no_credits")
+                        else logFail("no_quantity_other")
+                        continue
+                    }
 
                     // Use actual price functions with player tariffs for accurate pricing
                     val buyTotal = source.getSupplyPrice(commodityId, quantity.toDouble(), true)
                     val sellTotal = dest.getDemandPrice(commodityId, quantity.toDouble(), true)
                     val tradeMargin = sellTotal - buyTotal
 
-                    if (tradeMargin <= 0f) continue
-                    if (buyTotal > playerCredits) continue
+                    if (tradeMargin <= 0f) {
+                        logFail("no_trade_margin")
+                        continue
+                    }
+                    if (buyTotal > playerCredits) {
+                        logFail("insufficient_credits")
+                        continue
+                    }
 
-                    // Estimate travel costs
+                    // Estimate travel costs - use fleet directly for cross-system calculations
                     val sourceEntity = source.primaryEntity ?: continue
                     val destEntity = dest.primaryEntity ?: continue
-                    val daysToSource = RouteLocationCalculator.getTravelDays(fleetToken, sourceEntity)
+                    val daysToSource = RouteLocationCalculator.getTravelDays(fleet, sourceEntity)
                     val daysSourceToDest = RouteLocationCalculator.getTravelDays(sourceEntity, destEntity)
                     val totalDays = max(daysToSource + daysSourceToDest, 1f)
 
@@ -128,7 +155,7 @@ object TradeRouteCalculator {
                     val supplyCost = supplyCostPerDay * totalDays * supplyBasePrice
 
                     // Fuel consumption cost over the trip
-                    val distLYToSource = Misc.getDistanceLY(fleetToken, sourceEntity)
+                    val distLYToSource = Misc.getDistanceLY(fleet, sourceEntity)
                     val distLYSourceToDest = Misc.getDistanceLY(sourceEntity, destEntity)
                     val totalDistLY = distLYToSource + distLYSourceToDest
                     val fuelCost = fuelCostPerLY * totalDistLY * fuelBasePrice
@@ -136,7 +163,10 @@ object TradeRouteCalculator {
                     // Net profit after travel expenses
                     val netProfit = tradeMargin - supplyCost - fuelCost
 
-                    if (netProfit <= 0f) continue
+                    if (netProfit <= 0f) {
+                        logFail("negative_net_profit")
+                        continue
+                    }
 
                     val profitPerDay = netProfit / totalDays
 
@@ -166,9 +196,19 @@ object TradeRouteCalculator {
                             expectedProfit = netProfit,
                             estimatedDays = totalDays
                         )
+                    } else {
+                        logFail("below_threshold")
                     }
                 }
             }
+        }
+
+        if (bestRoute == null) {
+            val logger = Global.getLogger(this::class.java)
+            logger.info("findBestRoute: No route found. Checked $totalChecked combinations.")
+            logger.info("  Markets: ${markets.size}, Commodities: ${commodityIds.size}, Credits: ${Misc.getDGSCredits(playerCredits)}")
+            logger.info("  Cargo space: $cargoSpace, Min profit/day: ${Misc.getDGSCredits(minProfitPerDay)}")
+            logger.info("  Fail reasons: $failReasons")
         }
 
         return bestRoute

@@ -174,6 +174,15 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     }
 
     private fun evaluate() {
+        // If cargo is full, force re-offload
+        if (fleet.cargo.spaceLeft <= 0f && hasCargoToOffload()) {
+            Global.getLogger(this::class.java).info("Cargo full during evaluate, forcing re-offload")
+            fleet.memoryWithoutUpdate.unset(MEM_KEY_OFFLOADED)
+            state = TradeState.OFFLOADING
+            saveStateToMemory()
+            return
+        }
+
         val route = TradeRouteCalculator.findBestRoute(fleet)
         if (route == null) {
             // No profitable route found - dock at nearby market and retry next interval
