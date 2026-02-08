@@ -79,6 +79,16 @@ class TIH_TradeCommands : BaseCommandPlugin() {
         // Remove intel
         AutoTradeIntel.remove(fleet)
 
+        // Clear the auto-trade task so Nexerelin can reassign the fleet
+        val sf = SpecialForcesIntel.getIntelFromMemory(fleet)
+        if (sf != null) {
+            val task = sf.routeAI?.currentTask
+            if (task is AutoTradeTask) {
+                // Trigger Nexerelin to pick a new task by calling updateTaskIfNeeded
+                sf.routeAI.updateTaskIfNeeded()
+            }
+        }
+
         dialog.textPanel.addPara("Auto-trade disabled. The fleet has returned to normal operations.")
 
         return true

@@ -156,8 +156,19 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         interval.advance(days)
         if (!interval.intervalElapsed()) return
 
-        // Safety net: if Nexerelin replaced our AutoTradeTask (e.g. priority defense diversion),
-        // re-assign it so the route doesn't expire and despawn the fleet
+        // Check if Nexerelin assigned a different task (raid, patrol, etc.)
+        val sf = exerelin.campaign.intel.specialforces.SpecialForcesIntel.getIntelFromMemory(fleet)
+        val currentTask = sf?.routeAI?.currentTask
+        if (currentTask != null && currentTask !is AutoTradeTask) {
+            // Different task assigned - stop auto-trading completely
+            Global.getLogger(this::class.java).info("${fleet.name}: Different task assigned, stopping auto-trade")
+            fleet.memoryWithoutUpdate.unset(TradeFleetScript.MEM_KEY_TRADING)
+            cleanup()
+            AutoTradeIntel.remove(fleet)
+            return
+        }
+
+        // Safety net: ensure AutoTradeTask time is high to prevent route expiration
         ensureAutoTradeTask()
 
         saveStateToMemory()
@@ -406,6 +417,13 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     private fun ensureAutoTradeTask() {
         val sf = SpecialForcesIntel.getIntelFromMemory(fleet) ?: return
         val task = sf.routeAI?.currentTask ?: return
+
+        // If Nexerelin assigned a different task (raid, patrol, etc.), suspend auto-trading
+        // and let the fleet complete that task first
+        if (task !is AutoTradeTask) {
+            // Different task assigned - suspend auto-trading until task completes
+            return
+        }
 
         // Ensure task time is always high so route never expires and triggers despawn
         if (task.time < TIHConfig.taskTimeLimit * 0.1f) {
