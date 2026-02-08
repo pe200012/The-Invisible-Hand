@@ -93,6 +93,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         interval.advance(days)
         if (!interval.intervalElapsed()) return
 
+        // Safety net: if Nexerelin replaced our AutoTradeTask (e.g. priority defense diversion),
+        // re-assign it so the route doesn't expire and despawn the fleet
+        ensureAutoTradeTask()
+
         saveStateToMemory()
 
         when (state) {
@@ -308,6 +312,16 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         state = TradeState.EVALUATING
         saveStateToMemory()
         updateTaskText("Auto-trading: evaluating routes")
+    }
+
+    private fun ensureAutoTradeTask() {
+        val sf = SpecialForcesIntel.getIntelFromMemory(fleet) ?: return
+        val task = sf.routeAI?.currentTask ?: return
+
+        // Ensure task time is always high so route never expires and triggers despawn
+        if (task.time < 99999f) {
+            task.time = 999999f
+        }
     }
 
     private fun saveStateToMemory() {
