@@ -13,8 +13,6 @@ import kotlin.math.min
 
 object TradeRouteCalculator {
 
-    private const val CACHE_DURATION_DAYS = 1f
-
     private var cachedMarketPrices: MutableMap<String, MarketPriceData>? = null
     private var cacheTimestamp: Long = -1L
 
@@ -68,7 +66,7 @@ object TradeRouteCalculator {
         // Refresh cache if stale
         val clock = Global.getSector().clock
         val currentTime = clock.timestamp
-        if (cachedMarketPrices == null || cacheTimestamp < 0L || clock.getElapsedDaysSince(cacheTimestamp) > CACHE_DURATION_DAYS) {
+        if (cachedMarketPrices == null || cacheTimestamp < 0L || clock.getElapsedDaysSince(cacheTimestamp) > TIHConfig.cacheRefreshDays) {
             refreshPriceCache(markets, commodityIds)
             cacheTimestamp = currentTime
         }
@@ -105,9 +103,9 @@ object TradeRouteCalculator {
                     // Calculate trade quantity
                     val maxByCargo = (cargoSpace / unitCargo).toInt()
                     val maxByCredits = if (buyPricePerUnit > 0f) (playerCredits / buyPricePerUnit).toInt() else 0
-                    // Progressive cap: size 3 = 200, size 5 = 400, size 7 = 700, size 10 = 1300
+                    // Progressive cap based on config: quadratic + linear scaling
                     val marketSize = min(source.size, dest.size)
-                    val maxReasonable = (marketSize * marketSize * 10) + (marketSize * 50)
+                    val maxReasonable = (marketSize * marketSize * TIHConfig.quantityScalingQuadratic) + (marketSize * TIHConfig.quantityScalingLinear)
                     val quantity = min(min(maxByCargo, maxByCredits), maxReasonable)
                     if (quantity <= 0) continue
 
@@ -145,16 +143,16 @@ object TradeRouteCalculator {
                     // Economy bonus: prefer routes exploiting shortage/surplus
                     var economyMultiplier = 1.0f
                     val sourceExcess = (sourceData.excesses[commodityId] ?: 0).toFloat()
-                    if (sourceExcess > 0f) economyMultiplier += 0.1f * min(sourceExcess / 10f, 0.5f)
+                    if (sourceExcess > 0f) economyMultiplier += TIHConfig.excessBonusMax * min(sourceExcess / 10f, 1.0f)
                     val destDeficit = (destData.deficits[commodityId] ?: 0).toFloat()
-                    if (destDeficit > 0f) economyMultiplier += 0.15f * min(destDeficit / 10f, 0.5f)
-                    if (destData.hasTradeDisruption) economyMultiplier += 0.2f
+                    if (destDeficit > 0f) economyMultiplier += TIHConfig.deficitBonusMax * min(destDeficit / 10f, 1.0f)
+                    if (destData.hasTradeDisruption) economyMultiplier += TIHConfig.disruptionBonus
 
                     // Market impact penalty: avoid over-traded routes
                     val sourceImpact = abs(sourceData.tradeModQuantities[commodityId] ?: 0f)
                     val destImpact = abs(destData.tradeModQuantities[commodityId] ?: 0f)
-                    val impactThreshold = 2f * ((marketSize * marketSize * 10f) + (marketSize * 50f))
-                    val impactPenalty = 1.0f - min((sourceImpact + destImpact) / impactThreshold, 0.5f)
+                    val impactThreshold = TIHConfig.impactThresholdMultiplier * ((marketSize * marketSize * TIHConfig.quantityScalingQuadratic.toFloat()) + (marketSize * TIHConfig.quantityScalingLinear.toFloat()))
+                    val impactPenalty = 1.0f - min((sourceImpact + destImpact) / impactThreshold, TIHConfig.impactPenaltyMax)
 
                     val adjustedProfitPerDay = profitPerDay * economyMultiplier * impactPenalty
 
@@ -213,7 +211,7 @@ object TradeRouteCalculator {
         // Refresh cache if stale
         val clock = Global.getSector().clock
         val currentTime = clock.timestamp
-        if (cachedMarketPrices == null || cacheTimestamp < 0L || clock.getElapsedDaysSince(cacheTimestamp) > CACHE_DURATION_DAYS) {
+        if (cachedMarketPrices == null || cacheTimestamp < 0L || clock.getElapsedDaysSince(cacheTimestamp) > TIHConfig.cacheRefreshDays) {
             refreshPriceCache(markets, commodityIds)
             cacheTimestamp = currentTime
         }
@@ -278,16 +276,16 @@ object TradeRouteCalculator {
                 // Economy bonus
                 var economyMultiplier = 1.0f
                 val sourceExcess = (sourceData.excesses[commodityId] ?: 0).toFloat()
-                if (sourceExcess > 0f) economyMultiplier += 0.1f * min(sourceExcess / 10f, 0.5f)
+                if (sourceExcess > 0f) economyMultiplier += TIHConfig.excessBonusMax * min(sourceExcess / 10f, 1.0f)
                 val destDeficit = (destData.deficits[commodityId] ?: 0).toFloat()
-                if (destDeficit > 0f) economyMultiplier += 0.15f * min(destDeficit / 10f, 0.5f)
-                if (destData.hasTradeDisruption) economyMultiplier += 0.2f
+                if (destDeficit > 0f) economyMultiplier += TIHConfig.deficitBonusMax * min(destDeficit / 10f, 1.0f)
+                if (destData.hasTradeDisruption) economyMultiplier += TIHConfig.disruptionBonus
 
                 // Market impact penalty
                 val sourceImpact = abs(sourceData.tradeModQuantities[commodityId] ?: 0f)
                 val destImpact = abs(destData.tradeModQuantities[commodityId] ?: 0f)
-                val impactThreshold = 2f * ((marketSize * marketSize * 10f) + (marketSize * 50f))
-                val impactPenalty = 1.0f - min((sourceImpact + destImpact) / impactThreshold, 0.5f)
+                val impactThreshold = TIHConfig.impactThresholdMultiplier * ((marketSize * marketSize * TIHConfig.quantityScalingQuadratic.toFloat()) + (marketSize * TIHConfig.quantityScalingLinear.toFloat()))
+                val impactPenalty = 1.0f - min((sourceImpact + destImpact) / impactThreshold, TIHConfig.impactPenaltyMax)
 
                 val adjustedProfitPerDay = profitPerDay * economyMultiplier * impactPenalty
 

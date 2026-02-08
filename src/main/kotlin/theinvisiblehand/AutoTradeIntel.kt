@@ -16,8 +16,6 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
         private const val MEM_KEY_TRADES_COMPLETED = "\$tih_trades_completed"
         private const val MEM_KEY_BEST_ROUTE_PROFIT = "\$tih_best_route_profit"
         private const val MEM_KEY_BEST_ROUTE_DESC = "\$tih_best_route_desc"
-        const val MAX_HISTORY_SIZE = 50
-        const val DISPLAY_HISTORY_COUNT = 10
 
         fun getOrCreate(fleet: CampaignFleetAPI): AutoTradeIntel {
             val existing = fleet.memoryWithoutUpdate.get(MEM_KEY_INTEL)
@@ -153,7 +151,7 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
                 "Qty", tableWidth * 0.10f,
                 "Profit", tableWidth * 0.25f
             )
-            for (record in history.takeLast(DISPLAY_HISTORY_COUNT).reversed()) {
+            for (record in history.takeLast(TIHConfig.displayHistoryCount).reversed()) {
                 val comName = Global.getSector().economy.getCommoditySpec(record.commodityId)?.name ?: record.commodityId
                 val routeText = "${record.sourceMarketName} -> ${record.destMarketName}"
                 val profitColor = if (record.profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor()
@@ -221,6 +219,6 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
             profit = profit
         )
         getHistory().add(record)
-        while (getHistory().size > MAX_HISTORY_SIZE) getHistory().removeAt(0)
+        while (getHistory().size > TIHConfig.maxHistorySize) getHistory().removeAt(0)
     }
 }

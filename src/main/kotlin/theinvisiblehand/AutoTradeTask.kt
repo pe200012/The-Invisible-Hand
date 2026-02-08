@@ -13,7 +13,7 @@ class AutoTradeTask(priority: Float) : SpecialForcesTask(TaskType.WAIT_ORBIT, pr
         // Prevent Nexerelin from expiring the route segment and picking a new task.
         // Default is 45 days — after which notifyRouteFinished() replaces our task,
         // the intel ends, and SpecialForcesAssignmentAI despawns the fleet.
-        time = 999999f
+        time = TIHConfig.taskTimeLimit
     }
 
     @Volatile

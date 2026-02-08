@@ -11,6 +11,7 @@ class InvisibleHandModPlugin : BaseModPlugin() {
 
     override fun onApplicationLoad() {
         Global.getSettings().loadTexture(ICON_PATH)
+        TIHConfig.loadConfig()
     }
 
     override fun onGameLoad(newGame: Boolean) {

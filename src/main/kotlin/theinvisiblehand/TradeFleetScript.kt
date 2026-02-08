@@ -30,20 +30,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_COMMODITY_BLACKLIST = "\$tih_commodity_blacklist"
         const val MEM_KEY_MARKET_BLACKLIST = "\$tih_market_blacklist"
         const val MEM_KEY_OFFLOADED = "\$tih_offloaded"
+        private const val MEM_KEY_DELAY_UNTIL = "\$tih_delay_until"
 
         const val DEFAULT_MIN_PROFIT_PER_DAY = 100f
-
         private const val TRADE_MOD_ID = "tih_trade"
-        private const val TRADE_MOD_DAYS = 30f
-        private const val ARRIVAL_DISTANCE = 300f
-
-        // Balance: delays before/after buying/selling to slow down trade cycles
-        private const val DELAY_BEFORE_BUY_DAYS = 1f
-        private const val DELAY_AFTER_BUY_DAYS = 2f
-        private const val DELAY_BEFORE_SELL_DAYS = 1f
-        private const val DELAY_AFTER_SELL_DAYS = 3f
-
-        private const val MEM_KEY_DELAY_UNTIL = "\$tih_delay_until"
     }
 
     enum class TradeState {
@@ -255,18 +245,18 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
 
         val dist = Misc.getDistance(fleet.location, target.location)
-        if (dist < ARRIVAL_DISTANCE || fleet.containingLocation == target.containingLocation && dist < ARRIVAL_DISTANCE * 3) {
+        if (dist < TIHConfig.arrivalDistance || fleet.containingLocation == target.containingLocation && dist < TIHConfig.arrivalDistance * 3) {
             // Add delay before buy/sell to simulate docking, negotiations, etc.
             when (nextState) {
                 TradeState.BUYING -> {
-                    startDelay(DELAY_BEFORE_BUY_DAYS, target, "Docking and negotiating") {
+                    startDelay(TIHConfig.delayBeforeBuy, target, "Docking and negotiating") {
                         state = TradeState.BUYING
                         saveStateToMemory()
                         buy()
                     }
                 }
                 TradeState.SELLING -> {
-                    startDelay(DELAY_BEFORE_SELL_DAYS, target, "Docking and negotiating") {
+                    startDelay(TIHConfig.delayBeforeSell, target, "Docking and negotiating") {
                         state = TradeState.SELLING
                         saveStateToMemory()
                         sell()
@@ -303,7 +293,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Market economic impact
         val comData = route.source.getCommodityData(route.commodityId)
-        comData.addTradeModMinus(TRADE_MOD_ID, route.quantity.toFloat(), TRADE_MOD_DAYS)
+        comData.addTradeModMinus(TRADE_MOD_ID, route.quantity.toFloat(), TIHConfig.tradeModDuration)
 
         val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
 
@@ -318,7 +308,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         )
 
         // Balance: delay after buying to slow trade cycles
-        startDelay(DELAY_AFTER_BUY_DAYS, route.source.primaryEntity, "Loading cargo") {
+        startDelay(TIHConfig.delayAfterBuy, route.source.primaryEntity, "Loading cargo") {
             // After delay, travel to destination
             val destEntity = route.dest.primaryEntity
             fleet.clearAssignments()
@@ -360,7 +350,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Market economic impact
         val comData = route.dest.getCommodityData(route.commodityId)
-        comData.addTradeModPlus(TRADE_MOD_ID, sellQty, TRADE_MOD_DAYS)
+        comData.addTradeModPlus(TRADE_MOD_ID, sellQty, TIHConfig.tradeModDuration)
 
         // Compute actual profit (sell - buy)
         val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
@@ -383,7 +373,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         )
 
         // Balance: delay after selling to slow trade cycles
-        startDelay(DELAY_AFTER_SELL_DAYS, route.dest.primaryEntity, "Unloading cargo") {
+        startDelay(TIHConfig.delayAfterSell, route.dest.primaryEntity, "Unloading cargo") {
             // After delay, attempt trade chaining — avoid dead leg back to EVALUATING
             val chainRoute = TradeRouteCalculator.findBestRouteFrom(fleet, route.dest)
             if (chainRoute != null) {
@@ -409,8 +399,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val task = sf.routeAI?.currentTask ?: return
 
         // Ensure task time is always high so route never expires and triggers despawn
-        if (task.time < 99999f) {
-            task.time = 999999f
+        if (task.time < TIHConfig.taskTimeLimit * 0.1f) {
+            task.time = TIHConfig.taskTimeLimit
         }
     }
 
@@ -519,7 +509,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val entity = market.primaryEntity
         val dist = Misc.getDistance(fleet.location, entity.location)
 
-        if (fleet.containingLocation == entity.containingLocation && dist < ARRIVAL_DISTANCE * 3) {
+        if (fleet.containingLocation == entity.containingLocation && dist < TIHConfig.arrivalDistance * 3) {
             // Already at market — execute offload
             executeOffload(market)
             fleet.memoryWithoutUpdate.set(MEM_KEY_OFFLOADED, true)
@@ -579,7 +569,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
             // Market economic impact
             market.getCommodityData(commodityId)
-                .addTradeModPlus(TRADE_MOD_ID, qty, TRADE_MOD_DAYS)
+                .addTradeModPlus(TRADE_MOD_ID, qty, TIHConfig.tradeModDuration)
         }
 
         // 2. Transfer valuable items (weapons, fighters, hullmods, specials) to storage
@@ -648,14 +638,14 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Only resupply if we have a profit buffer
         val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT)
-        if (totalProfit < 5000f) return
+        if (totalProfit < TIHConfig.resupplyMinProfitBuffer) return
 
-        // Resupply supplies if below 50%
+        // Resupply supplies if below threshold
         val maxSupplies = cargo.maxCapacity
         val currentSupplies = cargo.supplies
-        val threshold = min(200f, maxSupplies * 0.5f)
+        val threshold = min(200f, maxSupplies * TIHConfig.resupplySuppliesThreshold)
         if (currentSupplies < threshold) {
-            val neededSupplies = (threshold * 1.2f).coerceAtLeast(0f)
+            val neededSupplies = (threshold * TIHConfig.resupplySuppliesTarget).coerceAtLeast(0f)
             val supplyPrice = market.getSupplyPrice(com.fs.starfarer.api.impl.campaign.ids.Commodities.SUPPLIES, neededSupplies.toDouble(), true)
             if (playerCredits.get() >= supplyPrice && neededSupplies > 0f) {
                 playerCredits.subtract(supplyPrice)
@@ -663,11 +653,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             }
         }
 
-        // Resupply fuel if below 50%
+        // Resupply fuel if below threshold
         val maxFuel = cargo.maxFuel
         val currentFuel = cargo.fuel
-        if (currentFuel < maxFuel * 0.5f) {
-            val neededFuel = (maxFuel * 0.75f - currentFuel).coerceAtLeast(0f)
+        if (currentFuel < maxFuel * TIHConfig.resupplyFuelThreshold) {
+            val neededFuel = (maxFuel * TIHConfig.resupplyFuelTarget - currentFuel).coerceAtLeast(0f)
             val fuelPrice = market.getSupplyPrice(com.fs.starfarer.api.impl.campaign.ids.Commodities.FUEL, neededFuel.toDouble(), true)
             if (playerCredits.get() >= fuelPrice && neededFuel > 0f) {
                 playerCredits.subtract(fuelPrice)
