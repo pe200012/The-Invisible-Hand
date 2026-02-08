@@ -291,7 +291,19 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             "ui_intel_log_update"
         )
 
-        // Back to evaluating for next trade
+        // Attempt trade chaining — avoid dead leg back to EVALUATING
+        val chainRoute = TradeRouteCalculator.findBestRouteFrom(fleet, route.dest)
+        if (chainRoute != null) {
+            currentRoute = chainRoute
+            saveRouteToMemory(chainRoute)
+            val chainCommodityName = Global.getSector().economy.getCommoditySpec(chainRoute.commodityId)?.name ?: chainRoute.commodityId
+            state = TradeState.BUYING
+            saveStateToMemory()
+            buy()  // Process immediately — we're already at the market
+            return
+        }
+
+        // No chain found — fall through to EVALUATING
         currentRoute = null
         state = TradeState.EVALUATING
         saveStateToMemory()

@@ -16,6 +16,8 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
         private const val MEM_KEY_TRADES_COMPLETED = "\$tih_trades_completed"
         private const val MEM_KEY_BEST_ROUTE_PROFIT = "\$tih_best_route_profit"
         private const val MEM_KEY_BEST_ROUTE_DESC = "\$tih_best_route_desc"
+        const val MAX_HISTORY_SIZE = 50
+        const val DISPLAY_HISTORY_COUNT = 10
 
         fun getOrCreate(fleet: CampaignFleetAPI): AutoTradeIntel {
             val existing = fleet.memoryWithoutUpdate.get(MEM_KEY_INTEL)
@@ -31,6 +33,14 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
             intel?.endAfterDelay()
             fleet.memoryWithoutUpdate.unset(MEM_KEY_INTEL)
         }
+    }
+
+    // Nullable for XStream backward compat (bypasses constructor)
+    private var tradeHistory: MutableList<TradeRecord>? = null
+
+    private fun getHistory(): MutableList<TradeRecord> {
+        if (tradeHistory == null) tradeHistory = mutableListOf()
+        return tradeHistory!!
     }
 
     init {
@@ -108,6 +118,45 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
         if (!marketBlacklist.isNullOrBlank()) {
             info.addPara("Blacklisted markets: %s", 3f, h, marketBlacklist)
         }
+
+        // Trade History section
+        val history = getHistory()
+        if (history.isNotEmpty()) {
+            info.addSectionHeading("Trade History", fleet.faction.baseUIColor, fleet.faction.darkUIColor, Alignment.MID, pad)
+
+            // 30-day profit/day average
+            val clock = Global.getSector().clock
+            val recentTrades = history.filter { clock.getElapsedDaysSince(it.timestamp) <= 30f }
+            if (recentTrades.isNotEmpty()) {
+                val recentProfit = recentTrades.sumOf { it.profit.toDouble() }.toFloat()
+                val daySpan = clock.getElapsedDaysSince(recentTrades.first().timestamp).coerceAtLeast(1f)
+                info.addPara("Avg profit/day (30d): %s", 3f, h, Misc.getDGSCredits(recentProfit / daySpan))
+            }
+
+            // Most traded commodity
+            val mostTraded = history.groupBy { it.commodityId }.maxByOrNull { it.value.size }
+            if (mostTraded != null) {
+                val comName = Global.getSector().economy.getCommoditySpec(mostTraded.key)?.name ?: mostTraded.key
+                info.addPara("Most traded: %s (%s trades)", 3f, h, comName, mostTraded.value.size.toString())
+            }
+
+            // Recent trades table (last 10, newest first)
+            info.addSectionHeading("Recent Trades", fleet.faction.baseUIColor, fleet.faction.darkUIColor, Alignment.MID, pad)
+            val tableWidth = width - 20f
+            info.beginTable(fleet.faction, 20f,
+                "Commodity", tableWidth * 0.25f,
+                "Route", tableWidth * 0.40f,
+                "Qty", tableWidth * 0.10f,
+                "Profit", tableWidth * 0.25f
+            )
+            for (record in history.takeLast(DISPLAY_HISTORY_COUNT).reversed()) {
+                val comName = Global.getSector().economy.getCommoditySpec(record.commodityId)?.name ?: record.commodityId
+                val routeText = "${record.sourceMarketName} -> ${record.destMarketName}"
+                val profitColor = if (record.profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor()
+                info.addRow(tc, comName, tc, routeText, h, record.quantity.toString(), profitColor, Misc.getDGSCredits(record.profit))
+            }
+            info.addTable("", 0, pad)
+        }
     }
 
     override fun getIcon(): String {
@@ -157,5 +206,17 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
             val desc = "$commodityName: ${route.source.name} → ${route.dest.name}"
             fleet.memoryWithoutUpdate.set(MEM_KEY_BEST_ROUTE_DESC, desc)
         }
+
+        // Append trade record to history
+        val record = TradeRecord(
+            timestamp = Global.getSector().clock.timestamp,
+            commodityId = route.commodityId,
+            sourceMarketName = route.source.name,
+            destMarketName = route.dest.name,
+            quantity = route.quantity,
+            profit = profit
+        )
+        getHistory().add(record)
+        while (getHistory().size > MAX_HISTORY_SIZE) getHistory().removeAt(0)
     }
 }
