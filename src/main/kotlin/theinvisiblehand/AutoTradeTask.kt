@@ -5,9 +5,9 @@ import exerelin.campaign.intel.specialforces.SpecialForcesRouteAI.TaskType
 
 /**
  * Subclass of SpecialForcesTask that overrides getText() to show
- * auto-trade status in the Nexerelin intel panel instead of "patrolling".
+ * auto-trade status in the Nexerelin intel panel instead of default task text.
  */
-class AutoTradeTask(priority: Float) : SpecialForcesTask(TaskType.PATROL, priority) {
+class AutoTradeTask(priority: Float) : SpecialForcesTask(TaskType.WAIT_ORBIT, priority) {
 
     @Volatile
     var tradeActionText: String = "Auto-trading"

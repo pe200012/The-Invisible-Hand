@@ -108,10 +108,19 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     private fun evaluate() {
         val route = TradeRouteCalculator.findBestRoute(fleet)
         if (route == null) {
-            // No profitable route found - orbit passively and retry next interval
+            // No profitable route found - dock at nearby market and retry next interval
+            val idleMarket = findNearestAccessibleMarket()
             fleet.clearAssignments()
-            fleet.addAssignment(FleetAssignment.ORBIT_PASSIVE, fleet, 2f, "Evaluating trade routes")
-            updateTaskText("Auto-trading: evaluating routes")
+            if (idleMarket?.primaryEntity != null) {
+                fleet.addAssignment(
+                    FleetAssignment.ORBIT_PASSIVE, idleMarket.primaryEntity, 2f,
+                    "Docked at ${idleMarket.name}, evaluating trade routes"
+                )
+                updateTaskText("Auto-trading: idle at ${idleMarket.name}", to = idleMarket.primaryEntity)
+            } else {
+                fleet.addAssignment(FleetAssignment.ORBIT_PASSIVE, fleet, 2f, "Evaluating trade routes")
+                updateTaskText("Auto-trading: evaluating routes")
+            }
 
             // Debug: send one-time notification about why no route found
             if (!fleet.memoryWithoutUpdate.getBoolean("\$tih_no_route_notified")) {
@@ -531,6 +540,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val task = sf.routeAI?.currentTask
         if (task is AutoTradeTask) {
             task.tradeActionText = text
+        }
+        // Keep task entity in sync so Nexerelin's assignment AI always has a non-null entity
+        if (task != null && to != null) {
+            task.setEntity(to)
         }
         // Update route segment so the intel panel shows correct from/to
         val segment = sf.route?.current

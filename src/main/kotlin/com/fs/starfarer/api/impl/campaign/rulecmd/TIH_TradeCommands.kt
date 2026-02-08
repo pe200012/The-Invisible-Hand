@@ -30,13 +30,15 @@ class TIH_TradeCommands : BaseCommandPlugin() {
     }
 
     private fun startTrade(dialog: InteractionDialogAPI, fleet: CampaignFleetAPI): Boolean {
-        // Assign an AutoTradeTask (subclass of SpecialForcesTask with PATROL type)
-        // so the Nexerelin intel panel shows "Auto-trading" instead of "patrolling"
+        // Assign an AutoTradeTask (subclass of SpecialForcesTask with WAIT_ORBIT type)
+        // so the Nexerelin intel panel shows "Auto-trading" instead of default task text
         val sf = SpecialForcesIntel.getIntelFromMemory(fleet)
         if (sf != null) {
             val task = AutoTradeTask(100f)
             task.playerIssued = true
             task.system = fleet.starSystem
+            // Set entity so Nexerelin's SpecialForcesAssignmentAI doesn't NPE
+            task.setEntity(fleet.starSystem?.center ?: fleet)
             task.params["tih_auto_trade"] = true
             sf.routeAI.assignTask(task)
         }
