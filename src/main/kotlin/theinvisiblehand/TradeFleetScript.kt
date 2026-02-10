@@ -298,6 +298,17 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         if (playerCredits.get() < buyPrice) {
             // Can't afford - re-evaluate
+            Global.getLogger(this::class.java).warn("${fleet.name}: Can't afford trade, re-evaluating")
+            state = TradeState.EVALUATING
+            currentRoute = null
+            saveStateToMemory()
+            return
+        }
+
+        // Check if price changed significantly (more than 20% worse)
+        val expectedBuyPrice = route.expectedProfit / 0.8f // rough estimate
+        if (buyPrice > expectedBuyPrice * 1.2f) {
+            Global.getLogger(this::class.java).warn("${fleet.name}: Buy price changed significantly, re-evaluating (was ~${expectedBuyPrice.toInt()}, now ${buyPrice.toInt()})")
             state = TradeState.EVALUATING
             currentRoute = null
             saveStateToMemory()
@@ -363,6 +374,19 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         val sellQty = actualQty.coerceAtMost(route.quantity.toFloat())
         val sellPrice = route.dest.getDemandPrice(route.commodityId, sellQty.toDouble(), true)
+        val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
+
+        // Check if this trade would result in a significant loss (more than 10% of buy cost)
+        val profit = sellPrice - buyCost
+        if (profit < -buyCost * 0.1f) {
+            Global.getLogger(this::class.java).warn("${fleet.name}: Trade would result in significant loss (${profit.toInt()}¢), aborting sale and re-evaluating")
+            // Don't execute the trade, just clear cargo and re-evaluate
+            // This is a loss but better than selling at a huge loss
+            state = TradeState.EVALUATING
+            currentRoute = null
+            saveStateToMemory()
+            return
+        }
 
         // Execute sale
         fleet.cargo.removeCommodity(route.commodityId, sellQty)
@@ -372,9 +396,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val comData = route.dest.getCommodityData(route.commodityId)
         comData.addTradeModPlus(TRADE_MOD_ID, sellQty, TIHConfig.tradeModDuration)
 
-        // Compute actual profit (sell - buy)
-        val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
-        val profit = sellPrice - buyCost
+        // Log if profit is negative
+        if (profit < 0) {
+            Global.getLogger(this::class.java).warn("${fleet.name}: Negative profit trade: bought for ${buyCost.toInt()}¢, sold for ${sellPrice.toInt()}¢, loss: ${(-profit).toInt()}¢")
+        }
         val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT) + profit
         fleet.memoryWithoutUpdate.set(MEM_KEY_TOTAL_PROFIT, totalProfit)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
