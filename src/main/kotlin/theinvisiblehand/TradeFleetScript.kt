@@ -31,6 +31,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_COMMODITY_BLACKLIST = "\$tih_commodity_blacklist"
         const val MEM_KEY_MARKET_BLACKLIST = "\$tih_market_blacklist"
         const val MEM_KEY_OFFLOADED = "\$tih_offloaded"
+        private const val SAFETY_FLAG_REASON = "tih_auto_trade_safety"
 
         const val DEFAULT_MIN_PROFIT_PER_DAY = 100f
         private const val TRADE_MOD_ID = "tih_trade"
@@ -76,6 +77,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Mark fleet as busy to prevent military diversion
         fleet.memoryWithoutUpdate.set(MemFlags.FLEET_BUSY, true)
+        applyAutoTradeSafetyFlags()
     }
 
     override fun isDone(): Boolean {
@@ -85,11 +87,16 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     override fun runWhilePaused(): Boolean = false
 
     override fun advance(amount: Float) {
-        if (isDone) return
+        if (isDone) {
+            cleanup()
+            return
+        }
 
         val days = Misc.getDays(amount)
         interval.advance(days)
         if (!interval.intervalElapsed()) return
+
+        applyAutoTradeSafetyFlags()
 
         // Check if Nexerelin assigned a different task (raid, patrol, etc.)
         val sf = exerelin.campaign.intel.specialforces.SpecialForcesIntel.getIntelFromMemory(fleet)
@@ -379,6 +386,20 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.set(MEM_KEY_STATE, state.name)
     }
 
+    private fun applyAutoTradeSafetyFlags() {
+        val mem = fleet.memoryWithoutUpdate
+        Misc.setFlagWithReason(mem, MemFlags.MEMORY_KEY_MAKE_NON_HOSTILE, SAFETY_FLAG_REASON, true, -1f)
+        Misc.setFlagWithReason(mem, MemFlags.FLEET_IGNORES_OTHER_FLEETS, SAFETY_FLAG_REASON, true, -1f)
+        Misc.setFlagWithReason(mem, MemFlags.FLEET_IGNORED_BY_OTHER_FLEETS, SAFETY_FLAG_REASON, true, -1f)
+    }
+
+    private fun clearAutoTradeSafetyFlags() {
+        val mem = fleet.memoryWithoutUpdate
+        Misc.setFlagWithReason(mem, MemFlags.MEMORY_KEY_MAKE_NON_HOSTILE, SAFETY_FLAG_REASON, false, 0f)
+        Misc.setFlagWithReason(mem, MemFlags.FLEET_IGNORES_OTHER_FLEETS, SAFETY_FLAG_REASON, false, 0f)
+        Misc.setFlagWithReason(mem, MemFlags.FLEET_IGNORED_BY_OTHER_FLEETS, SAFETY_FLAG_REASON, false, 0f)
+    }
+
     private fun saveRouteToMemory(route: TradeRoute) {
         fleet.memoryWithoutUpdate.set(MEM_KEY_COMMODITY, route.commodityId)
         fleet.memoryWithoutUpdate.set(MEM_KEY_QUANTITY, route.quantity)
@@ -411,6 +432,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     }
 
     fun cleanup() {
+        clearAutoTradeSafetyFlags()
         fleet.memoryWithoutUpdate.unset(MEM_KEY_STATE)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_COMMODITY)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_QUANTITY)

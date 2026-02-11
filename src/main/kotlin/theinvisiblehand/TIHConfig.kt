@@ -59,7 +59,21 @@ object TIHConfig {
 
     fun loadConfig() {
         try {
-            val configJson = Global.getSettings().loadJSON("tih_config.json")
+            val configPath = "data/config/tih_config.json"
+            val fallbackPath = "tih_config.json"
+            val configJson = try {
+                Global.getSettings().loadJSON(configPath)
+            } catch (primary: RuntimeException) {
+                // Backward compatibility for legacy package layouts.
+                try {
+                    Global.getSettings().loadJSON(fallbackPath)
+                } catch (_: RuntimeException) {
+                    Global.getLogger(TIHConfig::class.java).warn(
+                        "Config not found at $configPath or $fallbackPath, using defaults"
+                    )
+                    return
+                }
+            }
 
             // Trade routing
             minProfitPerDay = configJson.optDouble("minProfitPerDay", 100.0).toFloat()
@@ -114,9 +128,9 @@ object TIHConfig {
 
             Global.getLogger(TIHConfig::class.java).info("The Invisible Hand config loaded successfully")
         } catch (e: IOException) {
-            Global.getLogger(TIHConfig::class.java).warn("Failed to load tih_config.json, using defaults: ${e.message}")
+            Global.getLogger(TIHConfig::class.java).warn("Failed to load data/config/tih_config.json, using defaults: ${e.message}")
         } catch (e: Exception) {
-            Global.getLogger(TIHConfig::class.java).error("Error parsing tih_config.json: ${e.message}", e)
+            Global.getLogger(TIHConfig::class.java).error("Error parsing data/config/tih_config.json: ${e.message}", e)
         }
     }
 }
