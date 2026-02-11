@@ -24,6 +24,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_QUANTITY = "\$tih_trade_quantity"
         const val MEM_KEY_SOURCE_MARKET = "\$tih_trade_source"
         const val MEM_KEY_DEST_MARKET = "\$tih_trade_dest"
+        const val MEM_KEY_EXPECTED_BUY_COST = "\$tih_trade_expected_buy_cost"
         const val MEM_KEY_TOTAL_PROFIT = "\$tih_trade_total_profit"
         const val MEM_KEY_BUY_COST = "\$tih_trade_buy_cost"
         const val MEM_KEY_MIN_PROFIT_PER_DAY = "\$tih_min_profit_per_day"
@@ -227,14 +228,17 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             return
         }
 
-        // Check if price changed significantly (more than 20% worse)
-        val expectedBuyPrice = route.expectedProfit / 0.8f // rough estimate
-        if (buyPrice > expectedBuyPrice * 1.2f) {
-            Global.getLogger(this::class.java).warn("${fleet.name}: Buy price changed significantly, re-evaluating (was ~${expectedBuyPrice.toInt()}, now ${buyPrice.toInt()})")
-            state = TradeState.EVALUATING
-            currentRoute = null
-            saveStateToMemory()
-            return
+        // Check if price changed significantly (more than 20% worse vs planned buy cost)
+        if (route.expectedBuyCost > 0f) {
+            if (buyPrice > route.expectedBuyCost * 1.2f) {
+                Global.getLogger(this::class.java).warn(
+                    "${fleet.name}: Buy price changed significantly, re-evaluating (was ~${route.expectedBuyCost.toInt()}, now ${buyPrice.toInt()})"
+                )
+                state = TradeState.EVALUATING
+                currentRoute = null
+                saveStateToMemory()
+                return
+            }
         }
 
         // Execute purchase
@@ -380,6 +384,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.set(MEM_KEY_QUANTITY, route.quantity)
         fleet.memoryWithoutUpdate.set(MEM_KEY_SOURCE_MARKET, route.source.id)
         fleet.memoryWithoutUpdate.set(MEM_KEY_DEST_MARKET, route.dest.id)
+        fleet.memoryWithoutUpdate.set(MEM_KEY_EXPECTED_BUY_COST, route.expectedBuyCost)
     }
 
     private fun restoreRouteFromMemory(): TradeRoute? {
@@ -388,6 +393,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val quantity = mem.getFloat(MEM_KEY_QUANTITY).toInt()
         val sourceId = mem.getString(MEM_KEY_SOURCE_MARKET) ?: return null
         val destId = mem.getString(MEM_KEY_DEST_MARKET) ?: return null
+        val expectedBuyCost = mem.getFloat(MEM_KEY_EXPECTED_BUY_COST)
 
         val economy = Global.getSector().economy
         val source = economy.getMarket(sourceId) ?: return null
@@ -399,7 +405,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             commodityId = commodityId,
             quantity = quantity,
             expectedProfit = 0f,
-            estimatedDays = 0f
+            estimatedDays = 0f,
+            expectedBuyCost = expectedBuyCost
         )
     }
 
@@ -409,6 +416,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.unset(MEM_KEY_QUANTITY)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_SOURCE_MARKET)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_DEST_MARKET)
+        fleet.memoryWithoutUpdate.unset(MEM_KEY_EXPECTED_BUY_COST)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_OFFLOADED)
         fleet.memoryWithoutUpdate.unset("\$tih_delay_callback")

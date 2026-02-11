@@ -194,7 +194,8 @@ object TradeRouteCalculator {
                             commodityId = commodityId,
                             quantity = quantity,
                             expectedProfit = netProfit,
-                            estimatedDays = totalDays
+                            estimatedDays = totalDays,
+                            expectedBuyCost = buyTotal
                         )
                     } else {
                         logFail("below_threshold")
@@ -337,7 +338,8 @@ object TradeRouteCalculator {
                         commodityId = commodityId,
                         quantity = quantity,
                         expectedProfit = netProfit,
-                        estimatedDays = totalDays
+                        estimatedDays = totalDays,
+                        expectedBuyCost = buyTotal
                     )
                 }
             }
