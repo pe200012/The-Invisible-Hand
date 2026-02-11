@@ -13,6 +13,7 @@ import com.fs.starfarer.api.impl.campaign.intel.MessageIntel
 import com.fs.starfarer.api.util.IntervalUtil
 import com.fs.starfarer.api.util.Misc
 import exerelin.campaign.intel.specialforces.SpecialForcesIntel
+import java.awt.Color
 import kotlin.math.min
 
 class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
@@ -159,7 +160,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
                 sendTradeNotification(
                     "${fleet.name}: No profitable routes found",
                     "Min profit threshold: ${Misc.getDGSCredits(minProfit)}/day, Available credits: ${Misc.getDGSCredits(credits)}. Will continue searching...",
-                    "ui_intel_log_update"
+                    "ui_intel_log_update",
+                    highlights = arrayOf(Misc.getDGSCredits(minProfit), Misc.getDGSCredits(credits))
                 )
                 fleet.memoryWithoutUpdate.set("\$tih_no_route_notified", true, 5f) // Reset after 5 days
             }
@@ -268,7 +270,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         sendTradeNotification(
             "${fleet.name}: bought ${route.quantity} $commodityName",
             "at ${route.source.name} for ${Misc.getDGSCredits(buyPrice)}",
-            "ui_intel_log_update"
+            "ui_intel_log_update",
+            highlights = arrayOf(Misc.getDGSCredits(buyPrice))
         )
 
         // Travel to destination immediately after buying
@@ -344,7 +347,12 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         sendTradeNotification(
             "${fleet.name}: sold ${sellQty.toInt()} $commodityName",
             "at ${route.dest.name} for ${Misc.getDGSCredits(sellPrice)} (profit: ${Misc.getDGSCredits(profit)})",
-            "ui_intel_log_update"
+            "ui_intel_log_update",
+            highlights = arrayOf(Misc.getDGSCredits(sellPrice), Misc.getDGSCredits(profit)),
+            highlightColors = arrayOf(
+                Misc.getHighlightColor(),
+                if (profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor()
+            )
         )
 
         // Attempt trade chaining immediately — avoid dead leg back to EVALUATING
@@ -554,7 +562,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             sendTradeNotification(
                 "${fleet.name}: offloaded cargo",
                 "Sold commodities for ${Misc.getDGSCredits(totalSellRevenue)} at ${market.name}",
-                "ui_intel_log_update"
+                "ui_intel_log_update",
+                highlights = arrayOf(Misc.getDGSCredits(totalSellRevenue))
             )
         }
     }
@@ -631,9 +640,24 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
     }
 
-    private fun sendTradeNotification(title: String, detail: String, soundId: String) {
+    private fun sendTradeNotification(
+        title: String,
+        detail: String,
+        soundId: String,
+        highlights: Array<String> = emptyArray(),
+        highlightColors: Array<Color> = emptyArray()
+    ) {
         val intel = MessageIntel(title, Misc.getBasePlayerColor())
-        intel.addLine(detail, Misc.getTextColor())
+        if (highlights.isNotEmpty()) {
+            val colors = if (highlightColors.size == highlights.size) {
+                highlightColors
+            } else {
+                Array(highlights.size) { Misc.getHighlightColor() }
+            }
+            intel.addLine(detail, Misc.getTextColor(), highlights, *colors)
+        } else {
+            intel.addLine(detail, Misc.getTextColor())
+        }
         intel.icon = InvisibleHandModPlugin.ICON_PATH
         intel.sound = soundId
         Global.getSector().campaignUI.addMessage(intel)
