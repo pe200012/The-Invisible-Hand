@@ -30,7 +30,6 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_COMMODITY_BLACKLIST = "\$tih_commodity_blacklist"
         const val MEM_KEY_MARKET_BLACKLIST = "\$tih_market_blacklist"
         const val MEM_KEY_OFFLOADED = "\$tih_offloaded"
-        private const val MEM_KEY_DELAY_UNTIL = "\$tih_delay_until"
 
         const val DEFAULT_MIN_PROFIT_PER_DAY = 100f
         private const val TRADE_MOD_ID = "tih_trade"
@@ -42,14 +41,12 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         TRAVELING_TO_BUY,
         BUYING,
         TRAVELING_TO_SELL,
-        SELLING,
-        DELAYING
+        SELLING
     }
 
     private val interval = IntervalUtil(0.5f, 1.0f)
     private var state = TradeState.OFFLOADING
     private var currentRoute: TradeRoute? = null
-    private var delayCallback: (() -> Unit)? = null
 
     init {
         // Restore state from fleet memory if resuming from save
@@ -71,70 +68,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         // Restore route data if mid-trade
         if (state != TradeState.EVALUATING && state != TradeState.OFFLOADING) {
             currentRoute = restoreRouteFromMemory()
-            if (currentRoute == null && state != TradeState.DELAYING) {
-                state = TradeState.EVALUATING
-            }
-        }
-
-        // Restore delay callback after load based on what was in progress
-        if (state == TradeState.DELAYING) {
-            val route = currentRoute
-            val actionText = fleet.memoryWithoutUpdate.getString("\$tih_delay_callback") ?: "Processing"
-            if (actionText.contains("Docking") && route != null) {
-                // Was delaying before buy or sell - determine which based on route state
-                val hasCargo = fleet.cargo.getCommodityQuantity(route.commodityId) > 0
-                if (hasCargo) {
-                    // Has cargo - must be delaying before sell
-                    delayCallback = {
-                        state = TradeState.SELLING
-                        saveStateToMemory()
-                        sell()
-                    }
-                } else {
-                    // No cargo - must be delaying before buy
-                    delayCallback = {
-                        state = TradeState.BUYING
-                        saveStateToMemory()
-                        buy()
-                    }
-                }
-            } else if (actionText.contains("Loading") && route != null) {
-                // Was delaying after buy - restore callback to continue to sell
-                delayCallback = {
-                    val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
-                    val destEntity = route.dest.primaryEntity
-                    fleet.clearAssignments()
-                    fleet.addAssignment(
-                        FleetAssignment.GO_TO_LOCATION, destEntity, 999f,
-                        "Traveling to sell $commodityName at ${route.dest.name}"
-                    )
-                    state = TradeState.TRAVELING_TO_SELL
-                    saveStateToMemory()
-                    updateTaskText(
-                        "Auto-trading: selling $commodityName at ${route.dest.name}",
-                        from = route.source.primaryEntity,
-                        to = destEntity
-                    )
-                }
-            } else if (actionText.contains("Unloading") && route != null) {
-                // Was delaying after sell - restore callback to chain or evaluate
-                delayCallback = {
-                    val chainRoute = TradeRouteCalculator.findBestRouteFrom(fleet, route.dest)
-                    if (chainRoute != null) {
-                        currentRoute = chainRoute
-                        saveRouteToMemory(chainRoute)
-                        state = TradeState.BUYING
-                        saveStateToMemory()
-                        buy()
-                    } else {
-                        currentRoute = null
-                        state = TradeState.EVALUATING
-                        saveStateToMemory()
-                        updateTaskText("Auto-trading: evaluating routes")
-                    }
-                }
-            } else {
-                // Unknown delay state - fall back to evaluating
+            if (currentRoute == null) {
                 state = TradeState.EVALUATING
             }
         }
@@ -180,7 +114,6 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             TradeState.BUYING -> buy()
             TradeState.TRAVELING_TO_SELL -> checkArrival(TradeState.SELLING)
             TradeState.SELLING -> sell()
-            TradeState.DELAYING -> checkDelay()
         }
     }
 
@@ -266,22 +199,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         val dist = Misc.getDistance(fleet.location, target.location)
         if (dist < TIHConfig.arrivalDistance || fleet.containingLocation == target.containingLocation && dist < TIHConfig.arrivalDistance * 3) {
-            // Add delay before buy/sell to simulate docking, negotiations, etc.
+            state = nextState
+            saveStateToMemory()
             when (nextState) {
-                TradeState.BUYING -> {
-                    startDelay(TIHConfig.delayBeforeBuy, target, "Docking and negotiating") {
-                        state = TradeState.BUYING
-                        saveStateToMemory()
-                        buy()
-                    }
-                }
-                TradeState.SELLING -> {
-                    startDelay(TIHConfig.delayBeforeSell, target, "Docking and negotiating") {
-                        state = TradeState.SELLING
-                        saveStateToMemory()
-                        sell()
-                    }
-                }
+                TradeState.BUYING -> buy()
+                TradeState.SELLING -> sell()
                 else -> {}
             }
         }
@@ -338,23 +260,20 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             "ui_intel_log_update"
         )
 
-        // Balance: delay after buying to slow trade cycles
-        startDelay(TIHConfig.delayAfterBuy, route.source.primaryEntity, "Loading cargo") {
-            // After delay, travel to destination
-            val destEntity = route.dest.primaryEntity
-            fleet.clearAssignments()
-            fleet.addAssignment(
-                FleetAssignment.GO_TO_LOCATION, destEntity, 999f,
-                "Traveling to sell $commodityName at ${route.dest.name}"
-            )
-            state = TradeState.TRAVELING_TO_SELL
-            saveStateToMemory()
-            updateTaskText(
-                "Auto-trading: selling $commodityName at ${route.dest.name}",
-                from = route.source.primaryEntity,
-                to = destEntity
-            )
-        }
+        // Travel to destination immediately after buying
+        val destEntity = route.dest.primaryEntity
+        fleet.clearAssignments()
+        fleet.addAssignment(
+            FleetAssignment.GO_TO_LOCATION, destEntity, 999f,
+            "Traveling to sell $commodityName at ${route.dest.name}"
+        )
+        state = TradeState.TRAVELING_TO_SELL
+        saveStateToMemory()
+        updateTaskText(
+            "Auto-trading: selling $commodityName at ${route.dest.name}",
+            from = route.source.primaryEntity,
+            to = destEntity
+        )
     }
 
     private fun sell() {
@@ -417,26 +336,22 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             "ui_intel_log_update"
         )
 
-        // Balance: delay after selling to slow trade cycles
-        startDelay(TIHConfig.delayAfterSell, route.dest.primaryEntity, "Unloading cargo") {
-            // After delay, attempt trade chaining — avoid dead leg back to EVALUATING
-            val chainRoute = TradeRouteCalculator.findBestRouteFrom(fleet, route.dest)
-            if (chainRoute != null) {
-                currentRoute = chainRoute
-                saveRouteToMemory(chainRoute)
-                val chainCommodityName = Global.getSector().economy.getCommoditySpec(chainRoute.commodityId)?.name ?: chainRoute.commodityId
-                state = TradeState.BUYING
-                saveStateToMemory()
-                buy()  // Process immediately — we're already at the market
-                return@startDelay
-            }
-
-            // No chain found — fall through to EVALUATING
-            currentRoute = null
-            state = TradeState.EVALUATING
+        // Attempt trade chaining immediately — avoid dead leg back to EVALUATING
+        val chainRoute = TradeRouteCalculator.findBestRouteFrom(fleet, route.dest)
+        if (chainRoute != null) {
+            currentRoute = chainRoute
+            saveRouteToMemory(chainRoute)
+            state = TradeState.BUYING
             saveStateToMemory()
-            updateTaskText("Auto-trading: evaluating routes")
+            buy()
+            return
         }
+
+        // No chain found — fall through to EVALUATING
+        currentRoute = null
+        state = TradeState.EVALUATING
+        saveStateToMemory()
+        updateTaskText("Auto-trading: evaluating routes")
     }
 
     private fun ensureAutoTradeTask() {
@@ -453,55 +368,6 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         // Ensure task time is always high so route never expires and triggers despawn
         if (task.time < TIHConfig.taskTimeLimit * 0.1f) {
             task.time = TIHConfig.taskTimeLimit
-        }
-    }
-
-    private fun startDelay(days: Float, location: SectorEntityToken, actionText: String, onComplete: () -> Unit) {
-        val clock = Global.getSector().clock
-        // timestamp is in seconds, so convert days to seconds to add
-        val delaySeconds = days * clock.getSecondsPerDay()
-        fleet.memoryWithoutUpdate.set(MEM_KEY_DELAY_UNTIL, clock.timestamp + delaySeconds.toLong())
-
-        // Store callback as a memory key flag for state restoration
-        fleet.memoryWithoutUpdate.set("\$tih_delay_callback", actionText)
-
-        fleet.clearAssignments()
-        fleet.addAssignment(FleetAssignment.ORBIT_PASSIVE, location, days, actionText)
-
-        state = TradeState.DELAYING
-        saveStateToMemory()
-        updateTaskText("Auto-trading: $actionText")
-
-        // Store the callback for execution after delay
-        delayCallback = onComplete
-    }
-
-    private fun checkDelay() {
-        val delayUntil = fleet.memoryWithoutUpdate.getLong(MEM_KEY_DELAY_UNTIL)
-        if (delayUntil == 0L) {
-            // No delay set - shouldn't happen, fall back to evaluating
-            Global.getLogger(this::class.java).warn("checkDelay called but no delay timestamp set")
-            state = TradeState.EVALUATING
-            saveStateToMemory()
-            return
-        }
-
-        val clock = Global.getSector().clock
-        if (clock.timestamp >= delayUntil) {
-            // Delay complete - execute callback
-            fleet.memoryWithoutUpdate.unset(MEM_KEY_DELAY_UNTIL)
-            fleet.memoryWithoutUpdate.unset("\$tih_delay_callback")
-
-            val callback = delayCallback
-            if (callback == null) {
-                Global.getLogger(this::class.java).warn("Delay complete but no callback set, falling back to evaluating")
-                state = TradeState.EVALUATING
-                saveStateToMemory()
-                return
-            }
-
-            delayCallback = null
-            callback.invoke()
         }
     }
 
@@ -545,7 +411,6 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.unset(MEM_KEY_DEST_MARKET)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_OFFLOADED)
-        fleet.memoryWithoutUpdate.unset(MEM_KEY_DELAY_UNTIL)
         fleet.memoryWithoutUpdate.unset("\$tih_delay_callback")
         fleet.memoryWithoutUpdate.unset(MemFlags.FLEET_BUSY)
     }

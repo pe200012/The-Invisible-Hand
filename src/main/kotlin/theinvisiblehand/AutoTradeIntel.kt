@@ -88,10 +88,6 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
                     "Traveling to buy $commodityName at $sourceName"
                 }
                 "BUYING" -> "Executing purchase"
-                "DELAYING" -> {
-                    val actionText = fleet.memoryWithoutUpdate.getString("\$tih_delay_callback") ?: "Processing"
-                    actionText
-                }
                 "TRAVELING_TO_SELL" -> {
                     val destMarketId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_DEST_MARKET)
                     val commodityId = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY)

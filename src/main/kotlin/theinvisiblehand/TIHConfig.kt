@@ -31,16 +31,6 @@ object TIHConfig {
     var impactThresholdMultiplier = 2f  // 2x quantity cap
         private set
 
-    // Trade delays (days)
-    var delayBeforeBuy = 1f
-        private set
-    var delayAfterBuy = 2f
-        private set
-    var delayBeforeSell = 1f
-        private set
-    var delayAfterSell = 3f
-        private set
-
     // Auto-resupply
     var resupplyMinProfitBuffer = 5000f
         private set
@@ -95,15 +85,6 @@ object TIHConfig {
             if (impactPenalty != null) {
                 impactPenaltyMax = impactPenalty.optDouble("maxPenalty", 0.5).toFloat()
                 impactThresholdMultiplier = impactPenalty.optDouble("thresholdMultiplier", 2.0).toFloat()
-            }
-
-            // Trade delays
-            val delays = configJson.optJSONObject("delays")
-            if (delays != null) {
-                delayBeforeBuy = delays.optDouble("beforeBuy", 1.0).toFloat()
-                delayAfterBuy = delays.optDouble("afterBuy", 2.0).toFloat()
-                delayBeforeSell = delays.optDouble("beforeSell", 1.0).toFloat()
-                delayAfterSell = delays.optDouble("afterSell", 3.0).toFloat()
             }
 
             // Auto-resupply
