@@ -89,36 +89,6 @@ Example: With 2.0 multiplier, a route with quantity cap of 400:
   - 800 total impact = 50% penalty (max)
 
 ================================================================================
-TRADE DELAYS
-================================================================================
-
-All values in game days. Total delay per trade cycle = sum of all four.
-
-beforeBuy (default: 1)
-  - Delay when arriving at buy market
-  - Represents: docking, customs, finding suppliers, negotiating
-
-afterBuy (default: 2)
-  - Delay after purchase before departing
-  - Represents: loading cargo, inspections, paperwork
-
-beforeSell (default: 1)
-  - Delay when arriving at sell market
-  - Represents: docking, customs, finding buyers, negotiating
-
-afterSell (default: 3)
-  - Delay after sale before next action
-  - Represents: unloading cargo, payment processing, crew rest
-
-Total default: 7 days per round trip
-
-Balance recommendations:
-  - Too fast: Set all to 0-0.5 days (very profitable, possibly unbalanced)
-  - Default: Current values (balanced for vanilla economy)
-  - Slower: Increase afterBuy and afterSell to 3-5 days each
-  - Very slow: Set all to 3-5 days (most realistic, lowest profit/day)
-
-================================================================================
 AUTO-RESUPPLY
 ================================================================================
 
@@ -184,13 +154,11 @@ TIPS AND RECOMMENDATIONS
 For MORE profit:
   - Lower minProfitPerDay to 50-75
   - Increase quantity scaling (quadratic to 15-20)
-  - Reduce all delays to 0.5-1 day
   - Increase economy bonuses (0.1, 0.15, 0.3)
 
 For LESS profit (more balanced):
   - Raise minProfitPerDay to 200-300
   - Keep quantity scaling default or lower (quadratic to 5-8)
-  - Increase all delays to 2-4 days each
   - Keep economy bonuses default or lower
 
 For route DIVERSITY:

@@ -28,19 +28,6 @@
     "# thresholdMultiplier": "Penalty = impact / (quantity_cap * this_value)"
   },
 
-  "# Trade Delays": "Delays in game days to slow down trading cycles",
-  "delays": {
-    "beforeBuy": 1,
-    "# beforeBuy": "Docking and negotiating before purchase",
-    "afterBuy": 2,
-    "# afterBuy": "Loading cargo after purchase",
-    "beforeSell": 1,
-    "# beforeSell": "Docking and negotiating before sale",
-    "afterSell": 3,
-    "# afterSell": "Unloading cargo after sale",
-    "# Total per cycle": "7 days of delays per round trip"
-  },
-
   "# Auto-Resupply": "Automatic supply/fuel refilling at buy markets",
   "resupply": {
     "minProfitBuffer": 5000,
