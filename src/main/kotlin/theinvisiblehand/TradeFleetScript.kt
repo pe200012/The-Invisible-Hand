@@ -9,6 +9,7 @@ import com.fs.starfarer.api.campaign.SectorEntityToken
 import com.fs.starfarer.api.campaign.econ.MarketAPI
 import com.fs.starfarer.api.impl.campaign.ids.MemFlags
 import com.fs.starfarer.api.impl.campaign.ids.Submarkets
+import com.fs.starfarer.api.impl.campaign.intel.BaseIntelPlugin
 import com.fs.starfarer.api.impl.campaign.intel.MessageIntel
 import com.fs.starfarer.api.util.IntervalUtil
 import com.fs.starfarer.api.util.Misc
@@ -267,11 +268,12 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         autoResupply(route.source)
 
         // Notify player
-        sendTradeNotification(
-            "${fleet.name}: bought ${route.quantity} $commodityName",
-            "at ${route.source.name} for ${Misc.getDGSCredits(buyPrice)}",
-            "ui_intel_log_update",
-            highlights = arrayOf(Misc.getDGSCredits(buyPrice))
+        sendTradeListNotification(
+            title = "${fleet.name}: purchased ${route.quantity} $commodityName",
+            market = route.source,
+            goods = "Bought ${route.quantity} $commodityName",
+            transactionAmount = Misc.getDGSCredits(buyPrice),
+            soundId = "ui_intel_log_update"
         )
 
         // Travel to destination immediately after buying
@@ -344,15 +346,14 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
 
         // Notify player
-        sendTradeNotification(
-            "${fleet.name}: sold ${sellQty.toInt()} $commodityName",
-            "at ${route.dest.name} for ${Misc.getDGSCredits(sellPrice)} (profit: ${Misc.getDGSCredits(profit)})",
-            "ui_intel_log_update",
-            highlights = arrayOf(Misc.getDGSCredits(sellPrice), Misc.getDGSCredits(profit)),
-            highlightColors = arrayOf(
-                Misc.getHighlightColor(),
-                if (profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor()
-            )
+        sendTradeListNotification(
+            title = "${fleet.name}: sold ${sellQty.toInt()} $commodityName",
+            market = route.dest,
+            goods = "Sold ${sellQty.toInt()} $commodityName",
+            transactionAmount = Misc.getDGSCredits(sellPrice),
+            netProfit = Misc.getDGSCredits(profit),
+            netProfitColor = if (profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor(),
+            soundId = "ui_intel_log_update"
         )
 
         // Attempt trade chaining immediately — avoid dead leg back to EVALUATING
@@ -559,11 +560,12 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Notify player
         if (totalSellRevenue > 0f) {
-            sendTradeNotification(
-                "${fleet.name}: offloaded cargo",
-                "Sold commodities for ${Misc.getDGSCredits(totalSellRevenue)} at ${market.name}",
-                "ui_intel_log_update",
-                highlights = arrayOf(Misc.getDGSCredits(totalSellRevenue))
+            sendTradeListNotification(
+                title = "${fleet.name}: offloaded cargo",
+                market = market,
+                goods = "Sold mixed commodities",
+                transactionAmount = Misc.getDGSCredits(totalSellRevenue),
+                soundId = "ui_intel_log_update"
             )
         }
     }
@@ -658,6 +660,53 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         } else {
             intel.addLine(detail, Misc.getTextColor())
         }
+        intel.icon = InvisibleHandModPlugin.ICON_PATH
+        intel.sound = soundId
+        Global.getSector().campaignUI.addMessage(intel)
+    }
+
+    private fun sendTradeListNotification(
+        title: String,
+        market: MarketAPI,
+        goods: String,
+        transactionAmount: String,
+        soundId: String,
+        netProfit: String? = null,
+        netProfitColor: Color = Misc.getPositiveHighlightColor()
+    ) {
+        val intel = MessageIntel(title, Misc.getBasePlayerColor())
+
+        val marketColor = market.textColorForFactionOrPlanet ?: Misc.getHighlightColor()
+        intel.addLine(
+            BaseIntelPlugin.BULLET + "Market: %s",
+            Misc.getTextColor(),
+            arrayOf(market.name),
+            marketColor
+        )
+        intel.addLine(
+            BaseIntelPlugin.BULLET + "Goods: %s",
+            Misc.getTextColor(),
+            arrayOf(goods),
+            Misc.getHighlightColor()
+        )
+
+        if (netProfit != null) {
+            intel.addLine(
+                BaseIntelPlugin.BULLET + "Transaction Amount: %s (Net Profit: %s)",
+                Misc.getTextColor(),
+                arrayOf(transactionAmount, netProfit),
+                Misc.getHighlightColor(),
+                netProfitColor
+            )
+        } else {
+            intel.addLine(
+                BaseIntelPlugin.BULLET + "Transaction Amount: %s",
+                Misc.getTextColor(),
+                arrayOf(transactionAmount),
+                Misc.getHighlightColor()
+            )
+        }
+
         intel.icon = InvisibleHandModPlugin.ICON_PATH
         intel.sound = soundId
         Global.getSector().campaignUI.addMessage(intel)
