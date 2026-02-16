@@ -6,6 +6,7 @@ import com.fs.starfarer.api.campaign.CargoAPI
 import com.fs.starfarer.api.campaign.CampaignFleetAPI
 import com.fs.starfarer.api.campaign.FleetAssignment
 import com.fs.starfarer.api.campaign.SectorEntityToken
+import com.fs.starfarer.api.campaign.comm.CommMessageAPI
 import com.fs.starfarer.api.campaign.econ.MarketAPI
 import com.fs.starfarer.api.impl.campaign.ids.MemFlags
 import com.fs.starfarer.api.impl.campaign.ids.Submarkets
@@ -709,7 +710,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         intel.icon = InvisibleHandModPlugin.ICON_PATH
         intel.sound = soundId
-        Global.getSector().campaignUI.addMessage(intel)
+        Global.getSector().campaignUI.addMessage(
+            intel,
+            CommMessageAPI.MessageClickAction.INTEL_TAB,
+            AutoTradeIntel.getOrCreate(fleet)
+        )
     }
 
     private fun updateTaskText(text: String, from: SectorEntityToken? = null, to: SectorEntityToken? = null) {
