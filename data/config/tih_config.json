@@ -5,9 +5,9 @@
 
   "# Quantity Scaling": "Formula: (marketSize^2 * quadratic) + (marketSize * linear)",
   "quantityScaling": {
-    "quadratic": 10,
-    "linear": 50,
-    "# Examples": "size 3 = 200, size 5 = 400, size 7 = 700, size 10 = 1300"
+    "quadratic": 200,
+    "linear": 100,
+    "# Examples": "size 3 = 2100, size 5 = 5500, size 7 = 10500, size 10 = 21000"
   },
 
   "# Economy Scoring": "Bonuses for exploiting market conditions (as decimal multipliers)",
