@@ -11,6 +11,7 @@ import com.fs.starfarer.api.ui.Alignment
 import com.fs.starfarer.api.ui.SectorMapAPI
 import com.fs.starfarer.api.ui.TooltipMakerAPI
 import com.fs.starfarer.api.util.Misc
+import exerelin.campaign.intel.specialforces.SpecialForcesIntel
 import java.awt.Color
 
 class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
@@ -229,10 +230,11 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
             )
         }
         
+        val detachmentIntel = SpecialForcesIntel.getIntelFromMemory(fleet)
         Global.getSector().campaignUI.addMessage(
             intel,
             CommMessageAPI.MessageClickAction.INTEL_TAB,
-            this
+            detachmentIntel ?: this
         )
     }
 
