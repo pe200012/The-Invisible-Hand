@@ -270,7 +270,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Notify player
         sendTradeListNotification(
-            title = "${fleet.name}: purchased ${route.quantity} $commodityName",
+            title = "${fleet.name}",
             market = route.source,
             goods = "Bought ${route.quantity} $commodityName",
             transactionAmount = Misc.getDGSCredits(buyPrice),
@@ -348,7 +348,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Notify player
         sendTradeListNotification(
-            title = "${fleet.name}: sold ${sellQty.toInt()} $commodityName",
+            title = "${fleet.name}",
             market = route.dest,
             goods = "Sold ${sellQty.toInt()} $commodityName",
             transactionAmount = Misc.getDGSCredits(sellPrice),
@@ -562,7 +562,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         // Notify player
         if (totalSellRevenue > 0f) {
             sendTradeListNotification(
-                title = "${fleet.name}: offloaded cargo",
+                title = "${fleet.name}",
                 market = market,
                 goods = "Sold mixed commodities",
                 transactionAmount = Misc.getDGSCredits(totalSellRevenue),
@@ -685,7 +685,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             marketColor
         )
         intel.addLine(
-            BaseIntelPlugin.BULLET + "Goods: %s",
+            BaseIntelPlugin.BULLET + "%s",
             Misc.getTextColor(),
             arrayOf(goods),
             Misc.getHighlightColor()
@@ -693,7 +693,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         if (netProfit != null) {
             intel.addLine(
-                BaseIntelPlugin.BULLET + "Transaction Amount: %s (Net Profit: %s)",
+                BaseIntelPlugin.BULLET + "Transaction Amount: %s (profit: %s)",
                 Misc.getTextColor(),
                 arrayOf(transactionAmount, netProfit),
                 Misc.getHighlightColor(),
@@ -710,10 +710,18 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         intel.icon = InvisibleHandModPlugin.ICON_PATH
         intel.sound = soundId
+        
+        // Get or create the intel and add it to manager if not already added
+        val autoTradeIntel = AutoTradeIntel.getOrCreate(fleet)
+        if (!Global.getSector().intelManager.hasIntel(autoTradeIntel)) {
+            Global.getSector().intelManager.addIntel(autoTradeIntel)
+        }
+        
+        // Send clickable notification that opens the fleet's intel tab
         Global.getSector().campaignUI.addMessage(
             intel,
             CommMessageAPI.MessageClickAction.INTEL_TAB,
-            AutoTradeIntel.getOrCreate(fleet)
+            autoTradeIntel
         )
     }
 
