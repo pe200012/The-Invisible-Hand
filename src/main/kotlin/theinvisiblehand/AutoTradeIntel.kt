@@ -2,12 +2,16 @@ package theinvisiblehand
 
 import com.fs.starfarer.api.Global
 import com.fs.starfarer.api.campaign.CampaignFleetAPI
+import com.fs.starfarer.api.campaign.comm.CommMessageAPI
 import com.fs.starfarer.api.campaign.comm.IntelInfoPlugin
+import com.fs.starfarer.api.campaign.econ.MarketAPI
 import com.fs.starfarer.api.impl.campaign.intel.BaseIntelPlugin
+import com.fs.starfarer.api.impl.campaign.intel.MessageIntel
 import com.fs.starfarer.api.ui.Alignment
 import com.fs.starfarer.api.ui.SectorMapAPI
 import com.fs.starfarer.api.ui.TooltipMakerAPI
 import com.fs.starfarer.api.util.Misc
+import java.awt.Color
 
 class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
 
@@ -168,6 +172,68 @@ class AutoTradeIntel(private val fleet: CampaignFleetAPI) : BaseIntelPlugin() {
     override fun shouldRemoveIntel(): Boolean {
         // Remove if fleet no longer trading
         return !fleet.memoryWithoutUpdate.getBoolean(TradeFleetScript.MEM_KEY_TRADING) || !fleet.isAlive
+    }
+
+    /**
+     * Sends a custom trade notification with list-style layout.
+     * Clicking the notification will open exactly at this fleet's intel entry.
+     */
+    fun sendTradeUpdate(
+        title: String,
+        market: MarketAPI,
+        goods: String,
+        amount: String,
+        netProfit: String = "",
+        netProfitColor: Color = Misc.getPositiveHighlightColor()
+    ) {
+        val manager = Global.getSector().intelManager
+        
+        if (!manager.hasIntel(this)) {
+            manager.addIntel(this)
+        }
+        
+        val marketColor = market.textColorForFactionOrPlanet ?: Misc.getHighlightColor()
+        
+        val intel = MessageIntel(title, Misc.getBasePlayerColor())
+        intel.icon = getIcon()
+        intel.sound = "ui_intel_log_update"
+        
+        intel.addLine(
+            BaseIntelPlugin.BULLET + "Market: %s",
+            Misc.getTextColor(),
+            arrayOf(market.name),
+            marketColor
+        )
+        
+        intel.addLine(
+            BaseIntelPlugin.BULLET + "%s",
+            Misc.getTextColor(),
+            arrayOf(goods),
+            Misc.getHighlightColor()
+        )
+        
+        if (netProfit.isNotEmpty()) {
+            intel.addLine(
+                BaseIntelPlugin.BULLET + "Transaction Amount: %s (profit: %s)",
+                Misc.getTextColor(),
+                arrayOf(amount, netProfit),
+                Misc.getHighlightColor(),
+                netProfitColor
+            )
+        } else {
+            intel.addLine(
+                BaseIntelPlugin.BULLET + "Transaction Amount: %s",
+                Misc.getTextColor(),
+                arrayOf(amount),
+                Misc.getHighlightColor()
+            )
+        }
+        
+        Global.getSector().campaignUI.addMessage(
+            intel,
+            CommMessageAPI.MessageClickAction.INTEL_TAB,
+            this
+        )
     }
 
     override fun getArrowData(map: SectorMapAPI?): MutableList<IntelInfoPlugin.ArrowData>? {

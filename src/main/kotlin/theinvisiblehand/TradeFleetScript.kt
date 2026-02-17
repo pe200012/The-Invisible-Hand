@@ -269,12 +269,12 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         autoResupply(route.source)
 
         // Notify player
-        sendTradeListNotification(
+        val intel = AutoTradeIntel.getOrCreate(fleet)
+        intel.sendTradeUpdate(
             title = "${fleet.name}",
             market = route.source,
             goods = "Bought ${route.quantity} $commodityName",
-            transactionAmount = Misc.getDGSCredits(buyPrice),
-            soundId = "ui_intel_log_update"
+            amount = Misc.getDGSCredits(buyPrice)
         )
 
         // Travel to destination immediately after buying
@@ -341,20 +341,19 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
 
         // Record trade in intel
-        val intel = AutoTradeIntel.getOrCreate(fleet)
-        intel.recordTrade(profit, route)
+        AutoTradeIntel.getOrCreate(fleet).recordTrade(profit, route)
 
         val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
 
         // Notify player
-        sendTradeListNotification(
+        val intel = AutoTradeIntel.getOrCreate(fleet)
+        intel.sendTradeUpdate(
             title = "${fleet.name}",
             market = route.dest,
             goods = "Sold ${sellQty.toInt()} $commodityName",
-            transactionAmount = Misc.getDGSCredits(sellPrice),
+            amount = Misc.getDGSCredits(sellPrice),
             netProfit = Misc.getDGSCredits(profit),
-            netProfitColor = if (profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor(),
-            soundId = "ui_intel_log_update"
+            netProfitColor = if (profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor()
         )
 
         // Attempt trade chaining immediately — avoid dead leg back to EVALUATING
@@ -561,12 +560,12 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Notify player
         if (totalSellRevenue > 0f) {
-            sendTradeListNotification(
+            val intel = AutoTradeIntel.getOrCreate(fleet)
+            intel.sendTradeUpdate(
                 title = "${fleet.name}",
                 market = market,
                 goods = "Sold mixed commodities",
-                transactionAmount = Misc.getDGSCredits(totalSellRevenue),
-                soundId = "ui_intel_log_update"
+                amount = Misc.getDGSCredits(totalSellRevenue)
             )
         }
     }
