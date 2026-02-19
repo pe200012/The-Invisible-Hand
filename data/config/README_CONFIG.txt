@@ -173,8 +173,8 @@ For route STABILITY:
 
 ================================================================================
 
-After editing tih_config.json, restart Starsector for changes to take effect.
-The config is loaded when the game starts, not when you load a save.
+If LunaLib is NOT installed: after editing tih_config.json, restart Starsector for changes to take effect.
+If LunaLib is installed: use LunaLib settings UI for live updates without restart.
 
 For questions or issues, report at:
 https://github.com/anthropics/claude-code/issues (or your mod forum)

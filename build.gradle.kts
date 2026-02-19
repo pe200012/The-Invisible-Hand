@@ -2,6 +2,17 @@ plugins {
     kotlin("jvm") version "2.0.21"
 }
 
+val extractedLunaLibJar = layout.buildDirectory.file("tmp/lunalib/LunaLib.jar")
+
+val extractLunaLibJar by tasks.registering(Copy::class) {
+    from(zipTree("possibly-useful-libs/LunaLib.zip")) {
+        include("LunaLib/jars/LunaLib.jar")
+        eachFile { path = name }
+        includeEmptyDirs = false
+    }
+    into(layout.buildDirectory.dir("tmp/lunalib"))
+}
+
 repositories {
     mavenCentral()
 }
@@ -25,7 +36,16 @@ dependencies {
         "libs/LazyLib.jar",
         "libs/LazyLib-Kotlin.jar",
         "libs/Kotlin-Runtime.jar",
+        extractedLunaLibJar,
     ))
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    dependsOn(extractLunaLibJar)
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    dependsOn(extractLunaLibJar)
 }
 
 tasks.jar {

@@ -12,6 +12,9 @@ class InvisibleHandModPlugin : BaseModPlugin() {
     override fun onApplicationLoad() {
         Global.getSettings().loadTexture(ICON_PATH)
         TIHConfig.loadConfig()
+        if (Global.getSettings().modManager.isModEnabled("lunalib")) {
+            TIHLunaConfig.initializeAndLoad()
+        }
     }
 
     override fun onGameLoad(newGame: Boolean) {
