@@ -40,6 +40,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         private const val TRADE_MOD_ID = "tih_trade"
     }
 
+    private var impactEventCounter = 0L
+
     enum class TradeState {
         OFFLOADING,
         EVALUATING,
@@ -259,9 +261,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         // Store buy cost for profit calculation on sell
         fleet.memoryWithoutUpdate.set(MEM_KEY_BUY_COST, buyPrice)
 
-        // Market economic impact
-        val comData = route.source.getCommodityData(route.commodityId)
-        comData.addTradeModMinus(TRADE_MOD_ID, route.quantity.toFloat(), TIHConfig.tradeModDuration)
+        // Market economic impact (Nex-style cap: only consume currently excess stock)
+        applyBuyImpact(route.source, route.commodityId, route.quantity.toFloat())
 
         val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
 
@@ -328,9 +329,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         fleet.cargo.removeCommodity(route.commodityId, sellQty)
         Global.getSector().playerFleet.cargo.credits.add(sellPrice)
 
-        // Market economic impact
-        val comData = route.dest.getCommodityData(route.commodityId)
-        comData.addTradeModPlus(TRADE_MOD_ID, sellQty, TIHConfig.tradeModDuration)
+        // Market economic impact (Nex-style cap: only satisfy current deficit)
+        applySellImpact(route.dest, route.commodityId, sellQty)
 
         // Log if profit is negative
         if (profit < 0) {
@@ -541,9 +541,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             Global.getSector().playerFleet.cargo.credits.add(sellPrice)
             totalSellRevenue += sellPrice
 
-            // Market economic impact
-            market.getCommodityData(commodityId)
-                .addTradeModPlus(TRADE_MOD_ID, qty, TIHConfig.tradeModDuration)
+            // Market economic impact (Nex-style cap: only satisfy current deficit)
+            applySellImpact(market, commodityId, qty)
         }
 
         // 2. Transfer valuable items (weapons, fighters, hullmods, specials) to storage
@@ -640,6 +639,32 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
                 cargo.addFuel(neededFuel)
             }
         }
+    }
+
+    private fun applyBuyImpact(market: MarketAPI, commodityId: String, boughtQty: Float) {
+        if (boughtQty <= 0f) return
+        val comData = market.getCommodityData(commodityId)
+        val excess = comData.excessQuantity.toFloat().coerceAtLeast(0f)
+        val impactQty = min(boughtQty, excess)
+        if (impactQty <= 0f) return
+
+        // addTradeModMinus only applies negative quantity values.
+        comData.addTradeModMinus(nextImpactSourceId("buy", commodityId), -impactQty, TIHConfig.tradeModDuration)
+    }
+
+    private fun applySellImpact(market: MarketAPI, commodityId: String, soldQty: Float) {
+        if (soldQty <= 0f) return
+        val comData = market.getCommodityData(commodityId)
+        val deficit = comData.deficitQuantity.toFloat().coerceAtLeast(0f)
+        val impactQty = min(soldQty, deficit)
+        if (impactQty <= 0f) return
+
+        comData.addTradeModPlus(nextImpactSourceId("sell", commodityId), impactQty, TIHConfig.tradeModDuration)
+    }
+
+    private fun nextImpactSourceId(action: String, commodityId: String): String {
+        impactEventCounter += 1L
+        return "${TRADE_MOD_ID}_${fleet.id}_${action}_${commodityId}_$impactEventCounter"
     }
 
     private fun sendTradeNotification(

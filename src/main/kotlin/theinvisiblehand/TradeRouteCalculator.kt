@@ -7,7 +7,6 @@ import com.fs.starfarer.api.impl.campaign.fleets.RouteLocationCalculator
 import com.fs.starfarer.api.impl.campaign.ids.Commodities
 import com.fs.starfarer.api.impl.campaign.ids.Submarkets
 import com.fs.starfarer.api.util.Misc
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -22,9 +21,20 @@ object TradeRouteCalculator {
         val demandPrices: Map<String, Float>,
         val deficits: Map<String, Int>,
         val excesses: Map<String, Int>,
-        val tradeModQuantities: Map<String, Float>,
         val hasTradeDisruption: Boolean
     )
+
+    private fun calculateNexStyleQuantityCap(
+        sourceData: MarketPriceData,
+        destData: MarketPriceData,
+        commodityId: String,
+        quantityCapByCargoCreditsAndSize: Int
+    ): Int {
+        val sourceExcess = (sourceData.excesses[commodityId] ?: 0).coerceAtLeast(0)
+        val destDeficit = (destData.deficits[commodityId] ?: 0).coerceAtLeast(0)
+        val marketFlowCap = min(sourceExcess, destDeficit)
+        return min(quantityCapByCargoCreditsAndSize, marketFlowCap)
+    }
 
     fun findBestRoute(fleet: CampaignFleetAPI): TradeRoute? {
         val economy = Global.getSector().economy
@@ -122,11 +132,17 @@ object TradeRouteCalculator {
                     // Progressive cap based on config: quadratic + linear scaling
                     val marketSize = min(source.size, dest.size)
                     val maxReasonable = (marketSize * marketSize * TIHConfig.quantityScalingQuadratic) + (marketSize * TIHConfig.quantityScalingLinear)
-                    val quantity = min(min(maxByCargo, maxByCredits), maxReasonable)
+                    val initialCap = min(min(maxByCargo, maxByCredits), maxReasonable)
+                    val quantity = calculateNexStyleQuantityCap(sourceData, destData, commodityId, initialCap)
                     if (quantity <= 0) {
                         if (maxByCargo == 0) logFail("no_quantity_cargo_full")
                         else if (maxByCredits == 0) logFail("no_quantity_no_credits")
-                        else logFail("no_quantity_other")
+                        else {
+                            val sourceExcess = (sourceData.excesses[commodityId] ?: 0).coerceAtLeast(0)
+                            val destDeficit = (destData.deficits[commodityId] ?: 0).coerceAtLeast(0)
+                            if (sourceExcess <= 0 || destDeficit <= 0) logFail("no_quantity_no_market_flow")
+                            else logFail("no_quantity_other")
+                        }
                         continue
                     }
 
@@ -178,13 +194,7 @@ object TradeRouteCalculator {
                     if (destDeficit > 0f) economyMultiplier += TIHConfig.deficitBonusMax * min(destDeficit / 10f, 1.0f)
                     if (destData.hasTradeDisruption) economyMultiplier += TIHConfig.disruptionBonus
 
-                    // Market impact penalty: avoid over-traded routes
-                    val sourceImpact = abs(sourceData.tradeModQuantities[commodityId] ?: 0f)
-                    val destImpact = abs(destData.tradeModQuantities[commodityId] ?: 0f)
-                    val impactThreshold = TIHConfig.impactThresholdMultiplier * ((marketSize * marketSize * TIHConfig.quantityScalingQuadratic.toFloat()) + (marketSize * TIHConfig.quantityScalingLinear.toFloat()))
-                    val impactPenalty = 1.0f - min((sourceImpact + destImpact) / impactThreshold, TIHConfig.impactPenaltyMax)
-
-                    val adjustedProfitPerDay = profitPerDay * economyMultiplier * impactPenalty
+                    val adjustedProfitPerDay = profitPerDay * economyMultiplier
 
                     if (adjustedProfitPerDay > bestProfitPerDay) {
                         bestProfitPerDay = adjustedProfitPerDay
@@ -289,7 +299,8 @@ object TradeRouteCalculator {
                 // Progressive cap: size 3 = 200, size 5 = 400, size 7 = 700, size 10 = 1300
                 val marketSize = min(fromMarket.size, dest.size)
                 val maxReasonable = (marketSize * marketSize * 10) + (marketSize * 50)
-                val quantity = min(min(maxByCargo, maxByCredits), maxReasonable)
+                val initialCap = min(min(maxByCargo, maxByCredits), maxReasonable)
+                val quantity = calculateNexStyleQuantityCap(sourceData, destData, commodityId, initialCap)
                 if (quantity <= 0) continue
 
                 val buyTotal = fromMarket.getSupplyPrice(commodityId, quantity.toDouble(), true)
@@ -322,13 +333,7 @@ object TradeRouteCalculator {
                 if (destDeficit > 0f) economyMultiplier += TIHConfig.deficitBonusMax * min(destDeficit / 10f, 1.0f)
                 if (destData.hasTradeDisruption) economyMultiplier += TIHConfig.disruptionBonus
 
-                // Market impact penalty
-                val sourceImpact = abs(sourceData.tradeModQuantities[commodityId] ?: 0f)
-                val destImpact = abs(destData.tradeModQuantities[commodityId] ?: 0f)
-                val impactThreshold = TIHConfig.impactThresholdMultiplier * ((marketSize * marketSize * TIHConfig.quantityScalingQuadratic.toFloat()) + (marketSize * TIHConfig.quantityScalingLinear.toFloat()))
-                val impactPenalty = 1.0f - min((sourceImpact + destImpact) / impactThreshold, TIHConfig.impactPenaltyMax)
-
-                val adjustedProfitPerDay = profitPerDay * economyMultiplier * impactPenalty
+                val adjustedProfitPerDay = profitPerDay * economyMultiplier
 
                 if (adjustedProfitPerDay > bestProfitPerDay) {
                     bestProfitPerDay = adjustedProfitPerDay
@@ -355,7 +360,6 @@ object TradeRouteCalculator {
             val demand = mutableMapOf<String, Float>()
             val deficits = mutableMapOf<String, Int>()
             val excesses = mutableMapOf<String, Int>()
-            val tradeMods = mutableMapOf<String, Float>()
             for (id in commodityIds) {
                 // Price for 1 unit as a baseline for comparison (with player tariffs)
                 supply[id] = market.getSupplyPrice(id, 1.0, true)
@@ -363,11 +367,10 @@ object TradeRouteCalculator {
                 val comData = market.getCommodityData(id)
                 deficits[id] = comData.deficitQuantity
                 excesses[id] = comData.excessQuantity
-                tradeMods[id] = comData.combinedTradeModQuantity
             }
             val hasDisruption = market.hasCondition("event_trade_disruption")
                     || market.hasCondition("blockaded")
-            cache[market.id] = MarketPriceData(market, supply, demand, deficits, excesses, tradeMods, hasDisruption)
+            cache[market.id] = MarketPriceData(market, supply, demand, deficits, excesses, hasDisruption)
         }
         cachedMarketPrices = cache
     }

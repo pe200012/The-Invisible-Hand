@@ -22,8 +22,6 @@ object TIHLunaConfig {
     private const val KEY_EXCESS_BONUS_MAX = "tih_excessBonusMax"
     private const val KEY_DEFICIT_BONUS_MAX = "tih_deficitBonusMax"
     private const val KEY_DISRUPTION_BONUS = "tih_disruptionBonus"
-    private const val KEY_IMPACT_PENALTY_MAX = "tih_impactPenaltyMax"
-    private const val KEY_IMPACT_THRESHOLD_MULTIPLIER = "tih_impactThresholdMultiplier"
 
     private const val KEY_RESUPPLY_MIN_PROFIT_BUFFER = "tih_resupplyMinProfitBuffer"
     private const val KEY_RESUPPLY_SUPPLIES_THRESHOLD = "tih_resupplySuppliesThreshold"
@@ -122,26 +120,6 @@ object TIHLunaConfig {
             TIHConfig.disruptionBonus.toDouble(),
             0.0,
             2.0,
-            TAB_SCORING
-        )
-        LunaSettings.SettingsCreator.addDouble(
-            MOD_ID,
-            KEY_IMPACT_PENALTY_MAX,
-            "Impact Penalty Max",
-            "Maximum route score penalty from repeated route impact.",
-            TIHConfig.impactPenaltyMax.toDouble(),
-            0.0,
-            1.0,
-            TAB_SCORING
-        )
-        LunaSettings.SettingsCreator.addDouble(
-            MOD_ID,
-            KEY_IMPACT_THRESHOLD_MULTIPLIER,
-            "Impact Threshold Multiplier",
-            "Penalty reaches maximum at quantity cap multiplied by this value.",
-            TIHConfig.impactThresholdMultiplier.toDouble(),
-            0.1,
-            10.0,
             TAB_SCORING
         )
 
@@ -262,8 +240,6 @@ object TIHLunaConfig {
         TIHConfig.excessBonusMax = LunaSettings.getDouble(MOD_ID, KEY_EXCESS_BONUS_MAX)?.toFloat() ?: TIHConfig.excessBonusMax
         TIHConfig.deficitBonusMax = LunaSettings.getDouble(MOD_ID, KEY_DEFICIT_BONUS_MAX)?.toFloat() ?: TIHConfig.deficitBonusMax
         TIHConfig.disruptionBonus = LunaSettings.getDouble(MOD_ID, KEY_DISRUPTION_BONUS)?.toFloat() ?: TIHConfig.disruptionBonus
-        TIHConfig.impactPenaltyMax = LunaSettings.getDouble(MOD_ID, KEY_IMPACT_PENALTY_MAX)?.toFloat() ?: TIHConfig.impactPenaltyMax
-        TIHConfig.impactThresholdMultiplier = LunaSettings.getDouble(MOD_ID, KEY_IMPACT_THRESHOLD_MULTIPLIER)?.toFloat() ?: TIHConfig.impactThresholdMultiplier
 
         TIHConfig.resupplyMinProfitBuffer = LunaSettings.getDouble(MOD_ID, KEY_RESUPPLY_MIN_PROFIT_BUFFER)?.toFloat() ?: TIHConfig.resupplyMinProfitBuffer
         TIHConfig.resupplySuppliesThreshold = LunaSettings.getDouble(MOD_ID, KEY_RESUPPLY_SUPPLIES_THRESHOLD)?.toFloat() ?: TIHConfig.resupplySuppliesThreshold
