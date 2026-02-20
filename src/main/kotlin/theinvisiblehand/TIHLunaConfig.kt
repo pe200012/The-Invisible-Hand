@@ -15,6 +15,7 @@ object TIHLunaConfig {
 
     private const val KEY_MIN_PROFIT_PER_DAY = "tih_minProfitPerDay"
     private const val KEY_CACHE_REFRESH_DAYS = "tih_cacheRefreshDays"
+    private const val KEY_MAX_CREDITS_USAGE_PERCENT = "tih_maxCreditsUsagePercent"
 
     private const val KEY_QUANTITY_SCALING_QUADRATIC = "tih_quantityScalingQuadratic"
     private const val KEY_QUANTITY_SCALING_LINEAR = "tih_quantityScalingLinear"
@@ -68,6 +69,16 @@ object TIHLunaConfig {
             TIHConfig.cacheRefreshDays.toDouble(),
             0.05,
             30.0,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addDouble(
+            MOD_ID,
+            KEY_MAX_CREDITS_USAGE_PERCENT,
+            "Max Credits Usage Percent",
+            "Maximum percent of player credits that auto-trading can allocate.",
+            TIHConfig.maxCreditsUsagePercent.toDouble(),
+            0.0,
+            100.0,
             TAB_ROUTING
         )
         LunaSettings.SettingsCreator.addInt(
@@ -233,6 +244,7 @@ object TIHLunaConfig {
     private fun applyLunaValues() {
         TIHConfig.minProfitPerDay = LunaSettings.getDouble(MOD_ID, KEY_MIN_PROFIT_PER_DAY)?.toFloat() ?: TIHConfig.minProfitPerDay
         TIHConfig.cacheRefreshDays = LunaSettings.getDouble(MOD_ID, KEY_CACHE_REFRESH_DAYS)?.toFloat() ?: TIHConfig.cacheRefreshDays
+        TIHConfig.maxCreditsUsagePercent = LunaSettings.getDouble(MOD_ID, KEY_MAX_CREDITS_USAGE_PERCENT)?.toFloat() ?: TIHConfig.maxCreditsUsagePercent
 
         TIHConfig.quantityScalingQuadratic = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_QUADRATIC) ?: TIHConfig.quantityScalingQuadratic
         TIHConfig.quantityScalingLinear = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_LINEAR) ?: TIHConfig.quantityScalingLinear

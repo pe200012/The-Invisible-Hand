@@ -10,6 +10,8 @@ object TIHConfig {
         internal set
     var cacheRefreshDays = 1f
         internal set
+    var maxCreditsUsagePercent = 100f
+        internal set
 
     // Trade quantity scaling
     var quantityScalingQuadratic = 10
@@ -59,6 +61,7 @@ object TIHConfig {
 
     fun validateAndNormalize() {
         cacheRefreshDays = cacheRefreshDays.coerceAtLeast(0.05f)
+        maxCreditsUsagePercent = maxCreditsUsagePercent.coerceIn(0f, 100f)
 
         quantityScalingQuadratic = quantityScalingQuadratic.coerceAtLeast(0)
         quantityScalingLinear = quantityScalingLinear.coerceAtLeast(0)
@@ -105,6 +108,7 @@ object TIHConfig {
             // Trade routing
             minProfitPerDay = configJson.optDouble("minProfitPerDay", 100.0).toFloat()
             cacheRefreshDays = configJson.optDouble("cacheRefreshDays", 1.0).toFloat()
+            maxCreditsUsagePercent = configJson.optDouble("maxCreditsUsagePercent", 100.0).toFloat()
 
             // Trade quantity scaling
             val quantityScaling = configJson.optJSONObject("quantityScaling")

@@ -2,6 +2,8 @@
   "# Trade Routing": "Basic trade route evaluation settings",
   "minProfitPerDay": 100,
   "cacheRefreshDays": 1,
+  "maxCreditsUsagePercent": 100,
+  "# maxCreditsUsagePercent": "Maximum percent of player credits auto-trading can use",
 
   "# Quantity Scaling": "Formula: (marketSize^2 * quadratic) + (marketSize * linear)",
   "quantityScaling": {

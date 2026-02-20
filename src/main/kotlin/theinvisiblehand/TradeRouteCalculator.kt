@@ -41,6 +41,7 @@ object TradeRouteCalculator {
         val allMarkets = economy.marketsCopy
         val fleetFaction = fleet.faction
         val playerCredits = Global.getSector().playerFleet.cargo.credits.get()
+        val usableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
 
         // Get blacklists from fleet memory
         val commodityBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY_BLACKLIST)
@@ -128,7 +129,7 @@ object TradeRouteCalculator {
 
                     // Calculate trade quantity
                     val maxByCargo = (cargoSpace / unitCargo).toInt()
-                    val maxByCredits = if (buyPricePerUnit > 0f) (playerCredits / buyPricePerUnit).toInt() else 0
+                    val maxByCredits = if (buyPricePerUnit > 0f) (usableCredits / buyPricePerUnit).toInt() else 0
                     // Progressive cap based on config: quadratic + linear scaling
                     val marketSize = min(source.size, dest.size)
                     val maxReasonable = (marketSize * marketSize * TIHConfig.quantityScalingQuadratic) + (marketSize * TIHConfig.quantityScalingLinear)
@@ -155,7 +156,7 @@ object TradeRouteCalculator {
                         logFail("no_trade_margin")
                         continue
                     }
-                    if (buyTotal > playerCredits) {
+                    if (buyTotal > usableCredits) {
                         logFail("insufficient_credits")
                         continue
                     }
@@ -217,7 +218,7 @@ object TradeRouteCalculator {
         if (bestRoute == null) {
             val logger = Global.getLogger(this::class.java)
             logger.info("findBestRoute: No route found. Checked $totalChecked combinations.")
-            logger.info("  Markets: ${markets.size}, Commodities: ${commodityIds.size}, Credits: ${Misc.getDGSCredits(playerCredits)}")
+            logger.info("  Markets: ${markets.size}, Commodities: ${commodityIds.size}, Credits: ${Misc.getDGSCredits(playerCredits)}, Usable credits: ${Misc.getDGSCredits(usableCredits)}")
             logger.info("  Cargo space: $cargoSpace, Min profit/day: ${Misc.getDGSCredits(minProfitPerDay)}")
             logger.info("  Fail reasons: $failReasons")
         }
@@ -230,6 +231,7 @@ object TradeRouteCalculator {
         val allMarkets = economy.marketsCopy
         val fleetFaction = fleet.faction
         val playerCredits = Global.getSector().playerFleet.cargo.credits.get()
+        val usableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
 
         val commodityBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY_BLACKLIST)
             ?.split(",")?.map { it.trim() }?.toSet() ?: emptySet()
@@ -295,7 +297,7 @@ object TradeRouteCalculator {
                 if (marginPerUnit <= 0f) continue
 
                 val maxByCargo = (cargoSpace / unitCargo).toInt()
-                val maxByCredits = if (buyPricePerUnit > 0f) (playerCredits / buyPricePerUnit).toInt() else 0
+                val maxByCredits = if (buyPricePerUnit > 0f) (usableCredits / buyPricePerUnit).toInt() else 0
                 // Progressive cap: size 3 = 200, size 5 = 400, size 7 = 700, size 10 = 1300
                 val marketSize = min(fromMarket.size, dest.size)
                 val maxReasonable = (marketSize * marketSize * 10) + (marketSize * 50)
@@ -308,7 +310,7 @@ object TradeRouteCalculator {
                 val tradeMargin = sellTotal - buyTotal
 
                 if (tradeMargin <= 0f) continue
-                if (buyTotal > playerCredits) continue
+                if (buyTotal > usableCredits) continue
 
                 val destEntity = dest.primaryEntity ?: continue
                 // Fleet is already at source — no travel to source needed

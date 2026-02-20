@@ -230,7 +230,19 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
 
         val playerCredits = Global.getSector().playerFleet.cargo.credits
+        val usableCredits = playerCredits.get() * (TIHConfig.maxCreditsUsagePercent / 100f)
         val buyPrice = route.source.getSupplyPrice(route.commodityId, route.quantity.toDouble(), true)
+
+        if (buyPrice > usableCredits) {
+            // Can't afford - re-evaluate
+            Global.getLogger(this::class.java).warn(
+                "${fleet.name}: Trade exceeds configured credit usage cap (${Misc.getDGSCredits(usableCredits)}), re-evaluating"
+            )
+            state = TradeState.EVALUATING
+            currentRoute = null
+            saveStateToMemory()
+            return
+        }
 
         if (playerCredits.get() < buyPrice) {
             // Can't afford - re-evaluate

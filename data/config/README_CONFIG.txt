@@ -21,6 +21,13 @@ cacheRefreshDays (default: 1)
   - Higher = less CPU usage but may miss price changes
   - Recommended range: 0.5-3
 
+maxCreditsUsagePercent (default: 100)
+  - Maximum percent of player credits auto-trading can allocate
+  - 100 = no budget cap (legacy behavior)
+  - 50 = only half of current credits can be used for purchases
+  - 0 = disables buying by budget
+  - Recommended range: 30-80 for safer reserve management
+
 ================================================================================
 QUANTITY SCALING
 ================================================================================
