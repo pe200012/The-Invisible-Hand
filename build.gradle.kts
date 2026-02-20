@@ -59,6 +59,7 @@ tasks.register<Zip>("packageMod") {
     destinationDirectory.set(file("dist"))
     into("TheInvisibleHand") {
         from("mod_info.json")
+        from("the_invisible_hand.version")
         from("jars") { into("jars") }
         from("data") { into("data") }
         from("graphics") { into("graphics") }
