@@ -29,6 +29,17 @@ object TradePlanCalculator {
         val playerCredits = Global.getSector().playerFleet.cargo.credits.get()
         val startState = TradePlanSimState(playerCredits)
 
+        val coordinator = TIHTradeCoordinator.get()
+        val coordinationEnabled = TIHConfig.multiFleetCoordinationEnabled
+        if (coordinationEnabled) {
+            coordinator.seedPlanningSimState(startState, excludeFleetId = fleet.id)
+        }
+        val firstHopBuyBudget = if (coordinationEnabled) {
+            coordinator.getAvailableBuyBudgetCredits(excludeFleetIdReservation = fleet.id)
+        } else {
+            null
+        }
+
         var best: PartialPlan? = null
         var beam: List<PartialPlan> = listOf(
             PartialPlan(
@@ -50,7 +61,8 @@ object TradePlanCalculator {
                         fleet = fleet,
                         limit = max(beamWidth * candidatesPerHop, candidatesPerHop),
                         availableCredits = partial.sim.credits,
-                        simState = partial.sim
+                        simState = partial.sim,
+                        maxBuyBudget = firstHopBuyBudget
                     )
                 } else {
                     // Next hops: buy at the current market (previous destination).

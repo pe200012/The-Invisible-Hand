@@ -23,6 +23,10 @@ object TIHLunaConfig {
     private const val KEY_MULTI_HOP_FUTURE_DISCOUNT_PER_HOP = "tih_multiHopFutureDiscountPerHop"
     private const val KEY_MULTI_HOP_UNCERTAINTY_PENALTY_PER_DAY = "tih_multiHopUncertaintyPenaltyPerDay"
 
+    private const val KEY_MULTI_FLEET_COORDINATION_ENABLED = "tih_multiFleetCoordinationEnabled"
+    private const val KEY_MULTI_FLEET_RESERVATION_EXPIRY_DAYS = "tih_multiFleetReservationExpiryDays"
+    private const val KEY_MULTI_FLEET_REPLAN_COOLDOWN_DAYS = "tih_multiFleetReplanCooldownDays"
+
     private const val KEY_QUANTITY_SCALING_QUADRATIC = "tih_quantityScalingQuadratic"
     private const val KEY_QUANTITY_SCALING_LINEAR = "tih_quantityScalingLinear"
 
@@ -137,6 +141,36 @@ object TIHLunaConfig {
             TIHConfig.multiHopUncertaintyPenaltyPerDay.toDouble(),
             0.0,
             0.2,
+            TAB_ROUTING
+        )
+
+        LunaSettings.SettingsCreator.addHeader(MOD_ID, "tih_header_multifleet", "Multi-fleet Coordination", TAB_ROUTING)
+        LunaSettings.SettingsCreator.addBoolean(
+            MOD_ID,
+            KEY_MULTI_FLEET_COORDINATION_ENABLED,
+            "Enable Coordination",
+            "Coordinate multiple TIH trade fleets to reduce collisions and enforce a global trading exposure cap.",
+            TIHConfig.multiFleetCoordinationEnabled,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addDouble(
+            MOD_ID,
+            KEY_MULTI_FLEET_RESERVATION_EXPIRY_DAYS,
+            "Reservation Expiry Days",
+            "Days before a fleet reservation expires if it is not refreshed.",
+            TIHConfig.multiFleetReservationExpiryDays.toDouble(),
+            1.0,
+            365.0,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addDouble(
+            MOD_ID,
+            KEY_MULTI_FLEET_REPLAN_COOLDOWN_DAYS,
+            "Replan Cooldown Days",
+            "Minimum days between replans to reduce thrashing.",
+            TIHConfig.multiFleetReplanCooldownDays.toDouble(),
+            0.0,
+            30.0,
             TAB_ROUTING
         )
         LunaSettings.SettingsCreator.addInt(
@@ -309,6 +343,13 @@ object TIHLunaConfig {
         TIHConfig.multiHopCandidatesPerHop = LunaSettings.getInt(MOD_ID, KEY_MULTI_HOP_CANDIDATES_PER_HOP) ?: TIHConfig.multiHopCandidatesPerHop
         TIHConfig.multiHopFutureDiscountPerHop = LunaSettings.getDouble(MOD_ID, KEY_MULTI_HOP_FUTURE_DISCOUNT_PER_HOP)?.toFloat() ?: TIHConfig.multiHopFutureDiscountPerHop
         TIHConfig.multiHopUncertaintyPenaltyPerDay = LunaSettings.getDouble(MOD_ID, KEY_MULTI_HOP_UNCERTAINTY_PENALTY_PER_DAY)?.toFloat() ?: TIHConfig.multiHopUncertaintyPenaltyPerDay
+
+        TIHConfig.multiFleetCoordinationEnabled = LunaSettings.getBoolean(MOD_ID, KEY_MULTI_FLEET_COORDINATION_ENABLED)
+            ?: TIHConfig.multiFleetCoordinationEnabled
+        TIHConfig.multiFleetReservationExpiryDays = LunaSettings.getDouble(MOD_ID, KEY_MULTI_FLEET_RESERVATION_EXPIRY_DAYS)?.toFloat()
+            ?: TIHConfig.multiFleetReservationExpiryDays
+        TIHConfig.multiFleetReplanCooldownDays = LunaSettings.getDouble(MOD_ID, KEY_MULTI_FLEET_REPLAN_COOLDOWN_DAYS)?.toFloat()
+            ?: TIHConfig.multiFleetReplanCooldownDays
 
         TIHConfig.quantityScalingQuadratic = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_QUADRATIC) ?: TIHConfig.quantityScalingQuadratic
         TIHConfig.quantityScalingLinear = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_LINEAR) ?: TIHConfig.quantityScalingLinear

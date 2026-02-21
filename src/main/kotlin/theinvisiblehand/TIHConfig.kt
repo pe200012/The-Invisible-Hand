@@ -13,6 +13,14 @@ object TIHConfig {
     var maxCreditsUsagePercent = 100f
         internal set
 
+    // Multi-fleet coordination
+    var multiFleetCoordinationEnabled = true
+        internal set
+    var multiFleetReservationExpiryDays = 60f
+        internal set
+    var multiFleetReplanCooldownDays = 0.5f
+        internal set
+
     // Multi-hop planning
     var multiHopLookaheadDepth = 2
         internal set
@@ -75,6 +83,9 @@ object TIHConfig {
         cacheRefreshDays = cacheRefreshDays.coerceAtLeast(0.05f)
         maxCreditsUsagePercent = maxCreditsUsagePercent.coerceIn(0f, 100f)
 
+        multiFleetReservationExpiryDays = multiFleetReservationExpiryDays.coerceAtLeast(1f)
+        multiFleetReplanCooldownDays = multiFleetReplanCooldownDays.coerceIn(0f, 30f)
+
         multiHopLookaheadDepth = multiHopLookaheadDepth.coerceIn(1, 3)
         multiHopBeamWidth = multiHopBeamWidth.coerceIn(1, 20)
         multiHopCandidatesPerHop = multiHopCandidatesPerHop.coerceIn(1, 20)
@@ -127,6 +138,10 @@ object TIHConfig {
             minProfitPerDay = configJson.optDouble("minProfitPerDay", 100.0).toFloat()
             cacheRefreshDays = configJson.optDouble("cacheRefreshDays", 1.0).toFloat()
             maxCreditsUsagePercent = configJson.optDouble("maxCreditsUsagePercent", 100.0).toFloat()
+
+            multiFleetCoordinationEnabled = configJson.optBoolean("multiFleetCoordinationEnabled", true)
+            multiFleetReservationExpiryDays = configJson.optDouble("multiFleetReservationExpiryDays", 60.0).toFloat()
+            multiFleetReplanCooldownDays = configJson.optDouble("multiFleetReplanCooldownDays", 0.5).toFloat()
 
             multiHopLookaheadDepth = configJson.optInt("multiHopLookaheadDepth", 2)
             multiHopBeamWidth = configJson.optInt("multiHopBeamWidth", 5)

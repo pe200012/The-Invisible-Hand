@@ -86,6 +86,14 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         // Mark fleet as busy to prevent military diversion
         fleet.memoryWithoutUpdate.set(MemFlags.FLEET_BUSY, true)
         applyAutoTradeSafetyFlags()
+
+        // Restore multi-fleet coordination state (best-effort)
+        try {
+            val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
+            TIHTradeCoordinator.get().restoreFleetStateFromMemory(fleet.id, currentRoute, buyCost)
+        } catch (ex: Exception) {
+            Global.getLogger(this::class.java).warn("${fleet.name}: Failed to restore coordinator state: ${ex.message}")
+        }
     }
 
     override fun isDone(): Boolean {
@@ -145,7 +153,28 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         clearPlan()
         val plan = TradePlanCalculator.planTradePlan(fleet)
-        val route = plan?.legs?.firstOrNull() ?: TradeRouteCalculator.findBestRoute(fleet)
+        var route = plan?.legs?.firstOrNull()
+        if (route == null) {
+            val credits = Global.getSector().playerFleet.cargo.credits.get()
+            val sim = TradePlanSimState(credits)
+            val coordinator = TIHTradeCoordinator.get()
+            val coordinationEnabled = TIHConfig.multiFleetCoordinationEnabled
+            val budgetOverride = if (coordinationEnabled) {
+                coordinator.seedPlanningSimState(sim, excludeFleetId = fleet.id)
+                coordinator.getAvailableBuyBudgetCredits(excludeFleetIdReservation = fleet.id)
+            } else {
+                null
+            }
+
+            route = TradeRouteCalculator.findTopRouteCandidates(
+                fleet = fleet,
+                limit = 1,
+                availableCredits = credits,
+                maxBuyBudget = budgetOverride,
+                simState = sim,
+                logFailure = true
+            ).firstOrNull()?.route
+        }
         if (route == null) {
             // No profitable route found - dock at nearby market and retry next interval
             val idleMarket = findNearestAccessibleMarket()
@@ -166,21 +195,59 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
                 val minProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_MIN_PROFIT_PER_DAY)
                     .takeIf { it > 0f } ?: DEFAULT_MIN_PROFIT_PER_DAY
                 val credits = Global.getSector().playerFleet.cargo.credits.get()
+                val tradeBudget = if (TIHConfig.multiFleetCoordinationEnabled) {
+                    TIHTradeCoordinator.get().getAvailableBuyBudgetCredits(excludeFleetIdReservation = fleet.id)
+                } else {
+                    credits * (TIHConfig.maxCreditsUsagePercent / 100f)
+                }
                 sendTradeNotification(
                     "${fleet.name}: No profitable routes found",
-                    "Min profit threshold: ${Misc.getDGSCredits(minProfit)}/day, Available credits: ${Misc.getDGSCredits(credits)}. Will continue searching...",
+                    "Min profit threshold: ${Misc.getDGSCredits(minProfit)}/day, Available credits: ${Misc.getDGSCredits(credits)}, Trade budget: ${Misc.getDGSCredits(tradeBudget)}. Will continue searching...",
                     "ui_intel_log_update",
-                    highlights = arrayOf(Misc.getDGSCredits(minProfit), Misc.getDGSCredits(credits))
+                    highlights = arrayOf(Misc.getDGSCredits(minProfit), Misc.getDGSCredits(credits), Misc.getDGSCredits(tradeBudget))
                 )
                 fleet.memoryWithoutUpdate.set("\$tih_no_route_notified", true, 5f) // Reset after 5 days
             }
             return
         }
 
+        if (TIHConfig.multiFleetCoordinationEnabled) {
+            if (!TIHTradeCoordinator.get().tryReservePlannedLeg(fleet.id, route)) {
+                // Global budget is currently reserved by other trade fleets
+                val idleMarket = findNearestAccessibleMarket()
+                fleet.clearAssignments()
+                if (idleMarket?.primaryEntity != null) {
+                    fleet.addAssignment(
+                        FleetAssignment.ORBIT_PASSIVE, idleMarket.primaryEntity, 2f,
+                        "Docked at ${idleMarket.name}, waiting for trade budget"
+                    )
+                    updateTaskText("Auto-trading: waiting for trade budget at ${idleMarket.name}", to = idleMarket.primaryEntity)
+                } else {
+                    fleet.addAssignment(FleetAssignment.ORBIT_PASSIVE, fleet, 2f, "Waiting for trade budget")
+                    updateTaskText("Auto-trading: waiting for trade budget")
+                }
+
+                if (!fleet.memoryWithoutUpdate.getBoolean("\$tih_no_budget_notified")) {
+                    val tradeBudget = TIHTradeCoordinator.get().getAvailableBuyBudgetCredits(excludeFleetIdReservation = fleet.id)
+                    sendTradeNotification(
+                        "${fleet.name}: Trade budget currently unavailable",
+                        "Waiting for global trading budget. Available trade budget: ${Misc.getDGSCredits(tradeBudget)}. Will retry...",
+                        "ui_intel_log_update",
+                        highlights = arrayOf(Misc.getDGSCredits(tradeBudget))
+                    )
+                    fleet.memoryWithoutUpdate.set("\$tih_no_budget_notified", true, 5f)
+                }
+                return
+            }
+        }
+
         if (plan != null && plan.legs.isNotEmpty()) {
             currentPlan = plan
             planIndex = 0
         }
+
+        // Clear the budget wait notification flag when we successfully reserve a leg
+        fleet.memoryWithoutUpdate.unset("\$tih_no_budget_notified")
 
         // Clear the notification flag when route is found
         fleet.memoryWithoutUpdate.unset("\$tih_no_route_notified")
@@ -226,6 +293,15 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             return false
         }
 
+        if (TIHConfig.multiFleetCoordinationEnabled) {
+            if (!TIHTradeCoordinator.get().tryReservePlannedLeg(fleet.id, next)) {
+                Global.getLogger(this::class.java)
+                    .info("${fleet.name}: Next planned leg blocked by global trade budget, replanning")
+                clearPlan()
+                return false
+            }
+        }
+
         planIndex = nextIndex
         currentRoute = next
         saveRouteToMemory(next)
@@ -236,13 +312,33 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     }
 
     private fun replanNow(reason: String) {
-        Global.getLogger(this::class.java).info("${fleet.name}: Replanning trade routes ($reason)")
+        val logger = Global.getLogger(this::class.java)
+        logger.info("${fleet.name}: Replanning trade routes ($reason)")
+
+        val coordinator = TIHTradeCoordinator.get()
+        val route = currentRoute
+        val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
+        if (buyCost > 0f && route != null) {
+            val qty = fleet.cargo.getCommodityQuantity(route.commodityId)
+            if (qty > 0f) {
+                logger.warn("${fleet.name}: Replan requested while holding cargo; attempting salvage reroute")
+                attemptSellReroute(route, "replan requested while holding cargo")
+                return
+            }
+        }
+
+        coordinator.onSellOrOffloadComplete(fleet.id)
+
         TradeRouteCalculator.invalidateCache()
         clearPlan()
         currentRoute = null
+        fleet.clearAssignments()
         state = TradeState.EVALUATING
         saveStateToMemory()
-        evaluate()
+
+        if (coordinator.shouldReplanImmediately(fleet.id)) {
+            evaluate()
+        }
     }
 
     private fun travelingToBuyTick() {
@@ -272,12 +368,23 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             return
         }
 
-        val playerCredits = Global.getSector().playerFleet.cargo.credits.get()
-        val usableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
+        if (TIHConfig.multiFleetCoordinationEnabled) {
+            TIHTradeCoordinator.get().touchReservation(fleet.id)
+        }
+
         val buyPrice = source.getSupplyPrice(route.commodityId, route.quantity.toDouble(), true)
-        if (buyPrice > usableCredits) {
-            replanNow("buy exceeds configured credit cap")
-            return
+        val playerCredits = Global.getSector().playerFleet.cargo.credits.get()
+        if (!TIHConfig.multiFleetCoordinationEnabled) {
+            val usableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
+            if (buyPrice > usableCredits) {
+                replanNow("buy exceeds configured credit cap")
+                return
+            }
+        } else {
+            if (buyPrice > playerCredits) {
+                replanNow("insufficient credits for planned buy")
+                return
+            }
         }
         if (route.expectedBuyCost > 0f && buyPrice > route.expectedBuyCost * 1.2f) {
             replanNow("buy price spike vs plan")
@@ -292,6 +399,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             state = TradeState.EVALUATING
             saveStateToMemory()
             return
+        }
+
+        if (TIHConfig.multiFleetCoordinationEnabled) {
+            TIHTradeCoordinator.get().touchReservation(fleet.id)
         }
 
         val dest = route.dest
@@ -359,6 +470,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         currentRoute = newRoute
         saveRouteToMemory(newRoute)
 
+        if (TIHConfig.multiFleetCoordinationEnabled) {
+            TIHTradeCoordinator.get().updateReservationDest(fleet.id, best.dest.id)
+        }
+
         val destEntity = best.dest.primaryEntity ?: return
         fleet.clearAssignments()
         fleet.addAssignment(
@@ -410,16 +525,18 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
 
         val playerCredits = Global.getSector().playerFleet.cargo.credits
-        val usableCredits = playerCredits.get() * (TIHConfig.maxCreditsUsagePercent / 100f)
         val buyPrice = route.source.getSupplyPrice(route.commodityId, route.quantity.toDouble(), true)
 
-        if (buyPrice > usableCredits) {
-            // Can't afford - re-evaluate
-            Global.getLogger(this::class.java).warn(
-                "${fleet.name}: Trade exceeds configured credit usage cap (${Misc.getDGSCredits(usableCredits)}), re-evaluating"
-            )
-            replanNow("trade exceeds credit usage cap at source")
-            return
+        if (!TIHConfig.multiFleetCoordinationEnabled) {
+            val usableCredits = playerCredits.get() * (TIHConfig.maxCreditsUsagePercent / 100f)
+            if (buyPrice > usableCredits) {
+                // Can't afford - re-evaluate
+                Global.getLogger(this::class.java).warn(
+                    "${fleet.name}: Trade exceeds configured credit usage cap (${Misc.getDGSCredits(usableCredits)}), re-evaluating"
+                )
+                replanNow("trade exceeds credit usage cap at source")
+                return
+            }
         }
 
         if (playerCredits.get() < buyPrice) {
@@ -436,6 +553,18 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
                     "${fleet.name}: Buy price changed significantly, re-evaluating (was ~${route.expectedBuyCost.toInt()}, now ${buyPrice.toInt()})"
                 )
                 replanNow("buy price changed significantly at source")
+                return
+            }
+        }
+
+        if (TIHConfig.multiFleetCoordinationEnabled) {
+            val coordinator = TIHTradeCoordinator.get()
+            coordinator.touchReservation(fleet.id)
+            if (!coordinator.onBuyExecuted(fleet.id, buyPrice, route)) {
+                Global.getLogger(this::class.java).warn(
+                    "${fleet.name}: Global trading budget cap reached, re-evaluating"
+                )
+                replanNow("global trading budget cap reached")
                 return
             }
         }
@@ -489,6 +618,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val actualQty = fleet.cargo.getCommodityQuantity(route.commodityId)
         if (actualQty <= 0f) {
             // Cargo lost somehow - re-evaluate
+            TIHTradeCoordinator.get().onSellOrOffloadComplete(fleet.id)
+            fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
             state = TradeState.EVALUATING
             currentRoute = null
             saveStateToMemory()
@@ -528,6 +659,10 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
                     currentRoute = newRoute
                     saveRouteToMemory(newRoute)
 
+                    if (TIHConfig.multiFleetCoordinationEnabled) {
+                        TIHTradeCoordinator.get().updateReservationDest(fleet.id, best.dest.id)
+                    }
+
                     fleet.clearAssignments()
                     fleet.addAssignment(
                         FleetAssignment.GO_TO_LOCATION,
@@ -565,6 +700,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         val totalProfit = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_TOTAL_PROFIT) + profit
         fleet.memoryWithoutUpdate.set(MEM_KEY_TOTAL_PROFIT, totalProfit)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
+
+        // Release global coordination locks (budget + market-flow reservation)
+        TIHTradeCoordinator.get().onSellOrOffloadComplete(fleet.id)
 
         // Record trade in intel
         AutoTradeIntel.getOrCreate(fleet).recordTrade(profit, route)
@@ -662,6 +800,8 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     }
 
     fun cleanup() {
+        // Clear coordination state (reservations/budget locks)
+        TIHTradeCoordinator.get().clearFleetState(fleet.id)
         clearAutoTradeSafetyFlags()
         fleet.memoryWithoutUpdate.unset(MEM_KEY_STATE)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_COMMODITY)
@@ -777,6 +917,12 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
 
         cargo.removeEmptyStacks()
+
+        // Offload may end an in-progress trade; clear any trade locks/state
+        fleet.memoryWithoutUpdate.unset(MEM_KEY_BUY_COST)
+        TIHTradeCoordinator.get().onSellOrOffloadComplete(fleet.id)
+        clearPlan()
+        currentRoute = null
 
         // Notify player
         if (totalSellRevenue > 0f) {

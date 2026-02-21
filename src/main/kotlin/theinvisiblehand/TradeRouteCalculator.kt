@@ -246,6 +246,7 @@ object TradeRouteCalculator {
         fleet: CampaignFleetAPI,
         limit: Int,
         availableCredits: Float? = null,
+        maxBuyBudget: Float? = null,
         simState: TradePlanSimState? = null,
         logFailure: Boolean = false
     ): List<TradeRouteCandidate> {
@@ -255,7 +256,8 @@ object TradeRouteCalculator {
         val allMarkets = economy.marketsCopy
         val fleetFaction = fleet.faction
         val playerCredits = availableCredits ?: Global.getSector().playerFleet.cargo.credits.get()
-        val usableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
+        val defaultUsableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
+        val usableCredits = if (maxBuyBudget != null) min(defaultUsableCredits, maxBuyBudget) else defaultUsableCredits
 
         val commodityBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY_BLACKLIST)
             ?.split(",")?.map { it.trim() }?.toSet() ?: emptySet()
@@ -433,6 +435,7 @@ object TradeRouteCalculator {
         fromMarket: MarketAPI,
         limit: Int,
         availableCredits: Float? = null,
+        maxBuyBudget: Float? = null,
         simState: TradePlanSimState? = null
     ): List<TradeRouteCandidate> {
         val normalizedLimit = limit.coerceAtLeast(1)
@@ -441,7 +444,8 @@ object TradeRouteCalculator {
         val allMarkets = economy.marketsCopy
         val fleetFaction = fleet.faction
         val playerCredits = availableCredits ?: Global.getSector().playerFleet.cargo.credits.get()
-        val usableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
+        val defaultUsableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
+        val usableCredits = if (maxBuyBudget != null) min(defaultUsableCredits, maxBuyBudget) else defaultUsableCredits
 
         val commodityBlacklist = fleet.memoryWithoutUpdate.getString(TradeFleetScript.MEM_KEY_COMMODITY_BLACKLIST)
             ?.split(",")?.map { it.trim() }?.toSet() ?: emptySet()

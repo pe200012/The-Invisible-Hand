@@ -5,6 +5,14 @@
   "maxCreditsUsagePercent": 100,
   "# maxCreditsUsagePercent": "Maximum percent of player credits auto-trading can use",
 
+  "# Multi-fleet Coordination": "Settings for coordinating multiple trade fleets",
+  "multiFleetCoordinationEnabled": true,
+  "# multiFleetCoordinationEnabled": "Enable coordination between multiple TIH trade fleets",
+  "multiFleetReservationExpiryDays": 60,
+  "# multiFleetReservationExpiryDays": "Days before fleet reservations expire if not refreshed",
+  "multiFleetReplanCooldownDays": 0.5,
+  "# multiFleetReplanCooldownDays": "Minimum days between replans to reduce thrashing",
+
   "# Multi-hop Planning": "Lookahead planning settings (higher = smarter, slower)",
   "multiHopLookaheadDepth": 2,
   "# multiHopLookaheadDepth": "Number of hops to plan ahead (1-3)",

@@ -28,6 +28,18 @@ maxCreditsUsagePercent (default: 100)
   - 0 = disables buying by budget
   - Recommended range: 30-80 for safer reserve management
 
+multiFleetCoordinationEnabled (default: true)
+  - Enables coordination between multiple TIH trade fleets
+  - When enabled, TIH will reserve market flow (excess/deficit) and enforce a global trading exposure cap
+
+multiFleetReservationExpiryDays (default: 60)
+  - Days before a fleet reservation expires if it is not refreshed
+  - Reservations are refreshed while fleets are actively trading
+
+multiFleetReplanCooldownDays (default: 0.5)
+  - Minimum days between replans to reduce thrashing
+  - Higher = more stable but slower to react
+
 multiHopLookaheadDepth (default: 2)
   - Number of trade hops to plan ahead (1-3)
   - 1 = single-leg planning (legacy behavior)
