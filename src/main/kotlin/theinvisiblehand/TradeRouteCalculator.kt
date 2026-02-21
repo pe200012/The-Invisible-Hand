@@ -2,11 +2,13 @@ package theinvisiblehand
 
 import com.fs.starfarer.api.Global
 import com.fs.starfarer.api.campaign.CampaignFleetAPI
+import com.fs.starfarer.api.campaign.SectorEntityToken
 import com.fs.starfarer.api.campaign.econ.MarketAPI
 import com.fs.starfarer.api.impl.campaign.fleets.RouteLocationCalculator
 import com.fs.starfarer.api.impl.campaign.ids.Commodities
 import com.fs.starfarer.api.impl.campaign.ids.Submarkets
 import com.fs.starfarer.api.util.Misc
+import java.util.LinkedHashMap
 import java.util.PriorityQueue
 import kotlin.math.max
 import kotlin.math.min
@@ -15,6 +17,64 @@ object TradeRouteCalculator {
 
     private var cachedMarketPrices: MutableMap<String, MarketPriceData>? = null
     private var cacheTimestamp: Long = -1L
+
+    private data class EntityPairKey(val fromId: String, val toId: String)
+
+    private val travelDaysCache: LinkedHashMap<EntityPairKey, Float> = object : LinkedHashMap<EntityPairKey, Float>(
+        4096,
+        0.75f,
+        true
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<EntityPairKey, Float>?): Boolean {
+            val maxEntries = TIHConfig.travelCacheMaxEntries
+            return maxEntries > 0 && size > maxEntries
+        }
+    }
+
+    private val distanceLyCache: LinkedHashMap<EntityPairKey, Float> = object : LinkedHashMap<EntityPairKey, Float>(
+        4096,
+        0.75f,
+        true
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<EntityPairKey, Float>?): Boolean {
+            val maxEntries = TIHConfig.travelCacheMaxEntries
+            return maxEntries > 0 && size > maxEntries
+        }
+    }
+
+    private fun getTravelDaysCached(from: SectorEntityToken, to: SectorEntityToken): Float {
+        val maxEntries = TIHConfig.travelCacheMaxEntries
+        if (maxEntries <= 0) {
+            return RouteLocationCalculator.getTravelDays(from, to)
+        }
+
+        val key = EntityPairKey(from.id, to.id)
+        val cached = travelDaysCache[key]
+        if (cached != null) {
+            return cached
+        }
+
+        val computed = RouteLocationCalculator.getTravelDays(from, to)
+        travelDaysCache[key] = computed
+        return computed
+    }
+
+    private fun getDistanceLyCached(from: SectorEntityToken, to: SectorEntityToken): Float {
+        val maxEntries = TIHConfig.travelCacheMaxEntries
+        if (maxEntries <= 0) {
+            return Misc.getDistanceLY(from, to)
+        }
+
+        val key = EntityPairKey(from.id, to.id)
+        val cached = distanceLyCache[key]
+        if (cached != null) {
+            return cached
+        }
+
+        val computed = Misc.getDistanceLY(from, to)
+        distanceLyCache[key] = computed
+        return computed
+    }
 
     private data class MarketPriceData(
         val market: MarketAPI,
@@ -268,6 +328,7 @@ object TradeRouteCalculator {
             !market.isHidden
                 && !fleetFaction.isHostileTo(market.faction)
                 && market.hasSubmarket(Submarkets.SUBMARKET_OPEN)
+                && market.primaryEntity != null
                 && market.id !in marketBlacklist
         }
 
@@ -311,17 +372,93 @@ object TradeRouteCalculator {
             failReasons[reason] = (failReasons[reason] ?: 0) + 1
         }
 
+        val maxSourcesPerCommodity = TIHConfig.routeSearchMaxSourcesPerCommodity
+        val maxDestsPerCommodity = TIHConfig.routeSearchMaxDestsPerCommodity
+        val nearestSourceSamples = min(3, maxSourcesPerCommodity)
+
+        val sourceDaysCache = HashMap<String, Float>(markets.size)
+        val sourceDistCache = HashMap<String, Float>(markets.size)
+
+        val marketsByDistance = markets.sortedBy { market ->
+            val entity = market.primaryEntity ?: return@sortedBy Float.MAX_VALUE
+            Misc.getDistanceLY(fleet, entity)
+        }
+
+        data class MarketPrice(val market: MarketAPI, val price: Float)
+
         for (commodityId in commodityIds) {
             val spec = economy.getCommoditySpec(commodityId)
             val unitCargo = spec.cargoSpace
             if (unitCargo <= 0f) continue
 
-            for (source in markets) {
+            val sourcesByBuy = ArrayList<MarketPrice>(markets.size)
+            val destsBySell = ArrayList<MarketPrice>(markets.size)
+
+            for (market in markets) {
+                val data = cache[market.id] ?: continue
+
+                val buyPrice = data.supplyPrices[commodityId]
+                if (buyPrice != null && buyPrice > 0f) {
+                    val excessAdj = (data.excesses[commodityId] ?: 0).coerceAtLeast(0) - (simState?.getExcessUsed(market.id, commodityId) ?: 0)
+                    if (excessAdj > 0) {
+                        sourcesByBuy.add(MarketPrice(market, buyPrice))
+                    }
+                }
+
+                val sellPrice = data.demandPrices[commodityId]
+                if (sellPrice != null && sellPrice > 0f) {
+                    val deficitAdj = (data.deficits[commodityId] ?: 0).coerceAtLeast(0) - (simState?.getDeficitUsed(market.id, commodityId) ?: 0)
+                    if (deficitAdj > 0) {
+                        destsBySell.add(MarketPrice(market, sellPrice))
+                    }
+                }
+            }
+
+            if (sourcesByBuy.isEmpty() || destsBySell.isEmpty()) {
+                continue
+            }
+
+            sourcesByBuy.sortBy { it.price }
+            destsBySell.sortByDescending { it.price }
+
+            val selectedSources = LinkedHashSet<MarketAPI>()
+            val topSources = min(maxSourcesPerCommodity, sourcesByBuy.size)
+            for (i in 0 until topSources) {
+                selectedSources.add(sourcesByBuy[i].market)
+            }
+            if (nearestSourceSamples > 0) {
+                for (market in marketsByDistance) {
+                    if (selectedSources.size >= maxSourcesPerCommodity + nearestSourceSamples) {
+                        break
+                    }
+                    if (market in selectedSources) continue
+                    val data = cache[market.id] ?: continue
+                    val buyPrice = data.supplyPrices[commodityId] ?: continue
+                    if (buyPrice <= 0f) continue
+                    val excessAdj = (data.excesses[commodityId] ?: 0).coerceAtLeast(0) - (simState?.getExcessUsed(market.id, commodityId) ?: 0)
+                    if (excessAdj <= 0) continue
+                    selectedSources.add(market)
+                }
+            }
+
+            val selectedDests = destsBySell
+                .take(min(maxDestsPerCommodity, destsBySell.size))
+                .map { it.market }
+
+            for (source in selectedSources) {
                 val sourceData = cache[source.id] ?: continue
                 val buyPricePerUnit = sourceData.supplyPrices[commodityId] ?: continue
                 if (buyPricePerUnit <= 0f) continue
 
-                for (dest in markets) {
+                val sourceEntity = source.primaryEntity ?: continue
+                val daysToSource = sourceDaysCache.getOrPut(source.id) {
+                    RouteLocationCalculator.getTravelDays(fleet, sourceEntity)
+                }
+                val distLYToSource = sourceDistCache.getOrPut(source.id) {
+                    Misc.getDistanceLY(fleet, sourceEntity)
+                }
+
+                for (dest in selectedDests) {
                     totalChecked++
                     if (source.id == dest.id) {
                         logFail("same_market")
@@ -336,7 +473,7 @@ object TradeRouteCalculator {
                     }
 
                     val maxByCargo = (cargoSpace / unitCargo).toInt()
-                    val maxByCredits = if (buyPricePerUnit > 0f) (usableCredits / buyPricePerUnit).toInt() else 0
+                    val maxByCredits = (usableCredits / buyPricePerUnit).toInt()
                     val marketSize = min(source.size, dest.size)
                     val maxReasonable = (marketSize * marketSize * TIHConfig.quantityScalingQuadratic) + (marketSize * TIHConfig.quantityScalingLinear)
                     val initialCap = min(min(maxByCargo, maxByCredits), maxReasonable)
@@ -358,15 +495,12 @@ object TradeRouteCalculator {
                         continue
                     }
 
-                    val sourceEntity = source.primaryEntity ?: continue
                     val destEntity = dest.primaryEntity ?: continue
-                    val daysToSource = RouteLocationCalculator.getTravelDays(fleet, sourceEntity)
-                    val daysSourceToDest = RouteLocationCalculator.getTravelDays(sourceEntity, destEntity)
+                    val daysSourceToDest = getTravelDaysCached(sourceEntity, destEntity)
                     val totalDays = max(daysToSource + daysSourceToDest, 1f)
 
                     val supplyCost = supplyCostPerDay * totalDays * supplyBasePrice
-                    val distLYToSource = Misc.getDistanceLY(fleet, sourceEntity)
-                    val distLYSourceToDest = Misc.getDistanceLY(sourceEntity, destEntity)
+                    val distLYSourceToDest = getDistanceLyCached(sourceEntity, destEntity)
                     val fuelCost = fuelCostPerLY * (distLYToSource + distLYSourceToDest) * fuelBasePrice
 
                     val netProfit = tradeMargin - supplyCost - fuelCost
@@ -456,6 +590,7 @@ object TradeRouteCalculator {
             !market.isHidden
                 && !fleetFaction.isHostileTo(market.faction)
                 && market.hasSubmarket(Submarkets.SUBMARKET_OPEN)
+                && market.primaryEntity != null
                 && market.id !in marketBlacklist
         }
         if (markets.size < 2) {
@@ -493,6 +628,17 @@ object TradeRouteCalculator {
 
         val pq = PriorityQueue<TradeRouteCandidate>(compareBy { it.riskAdjustedScorePerDay })
 
+        val maxDestsPerCommodity = TIHConfig.routeSearchMaxDestsPerCommodity
+        val nearestDestSamples = min(3, maxDestsPerCommodity)
+
+        val destMarkets = markets.filter { it.id != fromMarket.id }
+        val destsByDistance = destMarkets.sortedBy { dest ->
+            val destEntity = dest.primaryEntity ?: return@sortedBy Float.MAX_VALUE
+            getDistanceLyCached(sourceEntity, destEntity)
+        }
+
+        data class MarketPrice(val market: MarketAPI, val price: Float)
+
         for (commodityId in commodityIds) {
             val spec = economy.getCommoditySpec(commodityId)
             val unitCargo = spec.cargoSpace
@@ -501,15 +647,46 @@ object TradeRouteCalculator {
             val buyPricePerUnit = sourceData.supplyPrices[commodityId] ?: continue
             if (buyPricePerUnit <= 0f) continue
 
-            for (dest in markets) {
-                if (fromMarket.id == dest.id) continue
+            val destsBySell = ArrayList<MarketPrice>(destMarkets.size)
+            for (dest in destMarkets) {
+                val destData = cache[dest.id] ?: continue
+                val sellPrice = destData.demandPrices[commodityId] ?: continue
+                if (sellPrice <= 0f) continue
+                val deficitAdj = (destData.deficits[commodityId] ?: 0).coerceAtLeast(0) - (simState?.getDeficitUsed(dest.id, commodityId) ?: 0)
+                if (deficitAdj <= 0) continue
+                destsBySell.add(MarketPrice(dest, sellPrice))
+            }
+            if (destsBySell.isEmpty()) continue
+            destsBySell.sortByDescending { it.price }
+
+            val selectedDests = LinkedHashSet<MarketAPI>()
+            val topDests = min(maxDestsPerCommodity, destsBySell.size)
+            for (i in 0 until topDests) {
+                selectedDests.add(destsBySell[i].market)
+            }
+            if (nearestDestSamples > 0) {
+                for (dest in destsByDistance) {
+                    if (selectedDests.size >= maxDestsPerCommodity + nearestDestSamples) {
+                        break
+                    }
+                    if (dest in selectedDests) continue
+                    val destData = cache[dest.id] ?: continue
+                    val sellPrice = destData.demandPrices[commodityId] ?: continue
+                    if (sellPrice <= 0f) continue
+                    val deficitAdj = (destData.deficits[commodityId] ?: 0).coerceAtLeast(0) - (simState?.getDeficitUsed(dest.id, commodityId) ?: 0)
+                    if (deficitAdj <= 0) continue
+                    selectedDests.add(dest)
+                }
+            }
+
+            for (dest in selectedDests) {
                 val destData = cache[dest.id] ?: continue
                 val sellPricePerUnit = destData.demandPrices[commodityId] ?: continue
                 val marginPerUnit = sellPricePerUnit - buyPricePerUnit
                 if (marginPerUnit <= 0f) continue
 
                 val maxByCargo = (cargoSpace / unitCargo).toInt()
-                val maxByCredits = if (buyPricePerUnit > 0f) (usableCredits / buyPricePerUnit).toInt() else 0
+                val maxByCredits = (usableCredits / buyPricePerUnit).toInt()
                 val marketSize = min(fromMarket.size, dest.size)
                 val maxReasonable = (marketSize * marketSize * TIHConfig.quantityScalingQuadratic) + (marketSize * TIHConfig.quantityScalingLinear)
                 val initialCap = min(min(maxByCargo, maxByCredits), maxReasonable)
@@ -523,11 +700,11 @@ object TradeRouteCalculator {
                 if (buyTotal > usableCredits) continue
 
                 val destEntity = dest.primaryEntity ?: continue
-                val daysSourceToDest = RouteLocationCalculator.getTravelDays(sourceEntity, destEntity)
+                val daysSourceToDest = getTravelDaysCached(sourceEntity, destEntity)
                 val totalDays = max(daysSourceToDest, 1f)
 
                 val supplyCost = supplyCostPerDay * totalDays * supplyBasePrice
-                val distLYSourceToDest = Misc.getDistanceLY(sourceEntity, destEntity)
+                val distLYSourceToDest = getDistanceLyCached(sourceEntity, destEntity)
                 val fuelCost = fuelCostPerLY * distLYSourceToDest * fuelBasePrice
 
                 val netProfit = tradeMargin - supplyCost - fuelCost

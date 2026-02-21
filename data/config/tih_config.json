@@ -12,6 +12,16 @@
   "# multiFleetReservationExpiryDays": "Days before fleet reservations expire if not refreshed",
   "multiFleetReplanCooldownDays": 0.5,
   "# multiFleetReplanCooldownDays": "Minimum days between replans to reduce thrashing",
+  "multiFleetPlanningSlotSpacingDays": 0.1,
+  "# multiFleetPlanningSlotSpacingDays": "Global spacing between planning computations across all trade fleets (days)",
+
+  "# Route Search Performance": "Caps and caches to reduce planning CPU cost",
+  "routeSearchMaxSourcesPerCommodity": 8,
+  "# routeSearchMaxSourcesPerCommodity": "Max source markets considered per commodity",
+  "routeSearchMaxDestsPerCommodity": 8,
+  "# routeSearchMaxDestsPerCommodity": "Max destination markets considered per commodity",
+  "travelCacheMaxEntries": 5000,
+  "# travelCacheMaxEntries": "Max cached travel-time/distance entries (0 disables caching)",
 
   "# Multi-hop Planning": "Lookahead planning settings (higher = smarter, slower)",
   "multiHopLookaheadDepth": 2,

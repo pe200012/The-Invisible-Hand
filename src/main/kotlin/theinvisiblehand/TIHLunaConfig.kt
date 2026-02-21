@@ -26,6 +26,11 @@ object TIHLunaConfig {
     private const val KEY_MULTI_FLEET_COORDINATION_ENABLED = "tih_multiFleetCoordinationEnabled"
     private const val KEY_MULTI_FLEET_RESERVATION_EXPIRY_DAYS = "tih_multiFleetReservationExpiryDays"
     private const val KEY_MULTI_FLEET_REPLAN_COOLDOWN_DAYS = "tih_multiFleetReplanCooldownDays"
+    private const val KEY_MULTI_FLEET_PLANNING_SLOT_SPACING_DAYS = "tih_multiFleetPlanningSlotSpacingDays"
+
+    private const val KEY_ROUTE_SEARCH_MAX_SOURCES_PER_COMMODITY = "tih_routeSearchMaxSourcesPerCommodity"
+    private const val KEY_ROUTE_SEARCH_MAX_DESTS_PER_COMMODITY = "tih_routeSearchMaxDestsPerCommodity"
+    private const val KEY_TRAVEL_CACHE_MAX_ENTRIES = "tih_travelCacheMaxEntries"
 
     private const val KEY_QUANTITY_SCALING_QUADRATIC = "tih_quantityScalingQuadratic"
     private const val KEY_QUANTITY_SCALING_LINEAR = "tih_quantityScalingLinear"
@@ -171,6 +176,48 @@ object TIHLunaConfig {
             TIHConfig.multiFleetReplanCooldownDays.toDouble(),
             0.0,
             30.0,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addDouble(
+            MOD_ID,
+            KEY_MULTI_FLEET_PLANNING_SLOT_SPACING_DAYS,
+            "Planning Slot Spacing Days",
+            "Global spacing between planning computations across all trade fleets.",
+            TIHConfig.multiFleetPlanningSlotSpacingDays.toDouble(),
+            0.0,
+            10.0,
+            TAB_ROUTING
+        )
+
+        LunaSettings.SettingsCreator.addHeader(MOD_ID, "tih_header_perf", "Route Search Performance", TAB_ROUTING)
+        LunaSettings.SettingsCreator.addInt(
+            MOD_ID,
+            KEY_ROUTE_SEARCH_MAX_SOURCES_PER_COMMODITY,
+            "Max Sources Per Commodity",
+            "Max source markets considered per commodity during route search.",
+            TIHConfig.routeSearchMaxSourcesPerCommodity,
+            1,
+            50,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addInt(
+            MOD_ID,
+            KEY_ROUTE_SEARCH_MAX_DESTS_PER_COMMODITY,
+            "Max Destinations Per Commodity",
+            "Max destination markets considered per commodity during route search.",
+            TIHConfig.routeSearchMaxDestsPerCommodity,
+            1,
+            50,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addInt(
+            MOD_ID,
+            KEY_TRAVEL_CACHE_MAX_ENTRIES,
+            "Travel Cache Max Entries",
+            "Max cached travel-time/distance entries. 0 disables caching.",
+            TIHConfig.travelCacheMaxEntries,
+            0,
+            100000,
             TAB_ROUTING
         )
         LunaSettings.SettingsCreator.addInt(
@@ -350,6 +397,15 @@ object TIHLunaConfig {
             ?: TIHConfig.multiFleetReservationExpiryDays
         TIHConfig.multiFleetReplanCooldownDays = LunaSettings.getDouble(MOD_ID, KEY_MULTI_FLEET_REPLAN_COOLDOWN_DAYS)?.toFloat()
             ?: TIHConfig.multiFleetReplanCooldownDays
+        TIHConfig.multiFleetPlanningSlotSpacingDays = LunaSettings.getDouble(MOD_ID, KEY_MULTI_FLEET_PLANNING_SLOT_SPACING_DAYS)?.toFloat()
+            ?: TIHConfig.multiFleetPlanningSlotSpacingDays
+
+        TIHConfig.routeSearchMaxSourcesPerCommodity = LunaSettings.getInt(MOD_ID, KEY_ROUTE_SEARCH_MAX_SOURCES_PER_COMMODITY)
+            ?: TIHConfig.routeSearchMaxSourcesPerCommodity
+        TIHConfig.routeSearchMaxDestsPerCommodity = LunaSettings.getInt(MOD_ID, KEY_ROUTE_SEARCH_MAX_DESTS_PER_COMMODITY)
+            ?: TIHConfig.routeSearchMaxDestsPerCommodity
+        TIHConfig.travelCacheMaxEntries = LunaSettings.getInt(MOD_ID, KEY_TRAVEL_CACHE_MAX_ENTRIES)
+            ?: TIHConfig.travelCacheMaxEntries
 
         TIHConfig.quantityScalingQuadratic = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_QUADRATIC) ?: TIHConfig.quantityScalingQuadratic
         TIHConfig.quantityScalingLinear = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_LINEAR) ?: TIHConfig.quantityScalingLinear

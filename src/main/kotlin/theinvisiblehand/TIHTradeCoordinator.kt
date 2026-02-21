@@ -2,6 +2,7 @@ package theinvisiblehand
 
 import com.fs.starfarer.api.Global
 import java.io.Serializable
+import java.util.ArrayDeque
 import kotlin.math.max
 import kotlin.math.min
 
@@ -48,7 +49,30 @@ class TIHTradeCoordinator private constructor() : Serializable {
     private val lockedBuyCostByFleet: MutableMap<String, Float> = HashMap()
     private val lastReplanTimestampByFleet: MutableMap<String, Long> = HashMap()
 
+    private val budgetQueue: ArrayDeque<String> = ArrayDeque()
+    private val budgetQueueSet: MutableSet<String> = HashSet()
+    private var nextPlanningPermitTimestamp: Long = -1L
+
     private fun nowTimestamp(): Long = Global.getSector().clock.timestamp
+
+    private fun ensureInBudgetQueue(fleetId: String) {
+        if (!budgetQueueSet.add(fleetId)) {
+            return
+        }
+        budgetQueue.addLast(fleetId)
+    }
+
+    private fun removeFromBudgetQueue(fleetId: String) {
+        if (!budgetQueueSet.remove(fleetId)) {
+            return
+        }
+        budgetQueue.remove(fleetId)
+    }
+
+    private fun rotateBudgetQueue() {
+        val head = budgetQueue.pollFirst() ?: return
+        budgetQueue.addLast(head)
+    }
 
     private fun pruneExpiredInternal() {
         if (!TIHConfig.multiFleetCoordinationEnabled) {
@@ -137,8 +161,15 @@ class TIHTradeCoordinator private constructor() : Serializable {
             return false
         }
 
+        ensureInBudgetQueue(fleetId)
+        if (budgetQueue.peekFirst() != fleetId) {
+            return false
+        }
+
         val availableBudget = getAvailableBuyBudgetCredits(excludeFleetIdReservation = null)
         if (expectedCost > availableBudget) {
+            // Yield turn if this fleet's chosen trade doesn't fit current budget.
+            rotateBudgetQueue()
             return false
         }
 
@@ -153,6 +184,9 @@ class TIHTradeCoordinator private constructor() : Serializable {
             state = ReservationState.PLANNED_TO_BUY,
             lastUpdatedTimestamp = now
         )
+
+        // Fairness: rotate after successful reservation.
+        rotateBudgetQueue()
         return true
     }
 
@@ -291,29 +325,39 @@ class TIHTradeCoordinator private constructor() : Serializable {
         lockedBuyCostByFleet.remove(fleetId)
         reservationsByFleet.remove(fleetId)
         lastReplanTimestampByFleet.remove(fleetId)
+        removeFromBudgetQueue(fleetId)
     }
 
     fun shouldReplanImmediately(fleetId: String): Boolean {
         if (!TIHConfig.multiFleetCoordinationEnabled) {
             return true
         }
+        val clock = Global.getSector().clock
+        val now = clock.timestamp
 
         val cooldownDays = TIHConfig.multiFleetReplanCooldownDays
-        if (cooldownDays <= 0f) {
-            lastReplanTimestampByFleet[fleetId] = nowTimestamp()
-            return true
+        if (cooldownDays > 0f) {
+            val last = lastReplanTimestampByFleet[fleetId]
+            if (last != null) {
+                val elapsed = clock.getElapsedDaysSince(last)
+                if (elapsed < cooldownDays) {
+                    return false
+                }
+            }
         }
 
-        val last = lastReplanTimestampByFleet[fleetId] ?: run {
-            lastReplanTimestampByFleet[fleetId] = nowTimestamp()
-            return true
+        val spacingDays = TIHConfig.multiFleetPlanningSlotSpacingDays
+        if (spacingDays > 0f) {
+            if (nextPlanningPermitTimestamp < 0L) {
+                nextPlanningPermitTimestamp = now
+            }
+            if (now < nextPlanningPermitTimestamp) {
+                return false
+            }
+            nextPlanningPermitTimestamp = now + clock.convertToSeconds(spacingDays).toLong()
         }
 
-        val elapsed = Global.getSector().clock.getElapsedDaysSince(last)
-        if (elapsed >= cooldownDays) {
-            lastReplanTimestampByFleet[fleetId] = nowTimestamp()
-            return true
-        }
-        return false
+        lastReplanTimestampByFleet[fleetId] = now
+        return true
     }
 }

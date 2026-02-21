@@ -40,6 +40,24 @@ multiFleetReplanCooldownDays (default: 0.5)
   - Minimum days between replans to reduce thrashing
   - Higher = more stable but slower to react
 
+multiFleetPlanningSlotSpacingDays (default: 0.1)
+  - Global spacing between expensive planning computations across all trade fleets (days)
+  - Higher = smoother CPU usage, slower reaction
+  - Set to 0 to disable global planning throttling
+
+routeSearchMaxSourcesPerCommodity (default: 8)
+  - Max source markets considered per commodity during route search
+  - Higher = better route quality, more CPU
+
+routeSearchMaxDestsPerCommodity (default: 8)
+  - Max destination markets considered per commodity during route search
+  - Higher = better route quality, more CPU
+
+travelCacheMaxEntries (default: 5000)
+  - Max cached travel-time/distance entries used for route evaluation
+  - Higher = fewer repeated travel calculations, more memory
+  - Set to 0 to disable travel caching
+
 multiHopLookaheadDepth (default: 2)
   - Number of trade hops to plan ahead (1-3)
   - 1 = single-leg planning (legacy behavior)

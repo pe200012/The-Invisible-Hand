@@ -20,6 +20,16 @@ object TIHConfig {
         internal set
     var multiFleetReplanCooldownDays = 0.5f
         internal set
+    var multiFleetPlanningSlotSpacingDays = 0.1f
+        internal set
+
+    // Route search performance
+    var routeSearchMaxSourcesPerCommodity = 8
+        internal set
+    var routeSearchMaxDestsPerCommodity = 8
+        internal set
+    var travelCacheMaxEntries = 5000
+        internal set
 
     // Multi-hop planning
     var multiHopLookaheadDepth = 2
@@ -85,6 +95,11 @@ object TIHConfig {
 
         multiFleetReservationExpiryDays = multiFleetReservationExpiryDays.coerceAtLeast(1f)
         multiFleetReplanCooldownDays = multiFleetReplanCooldownDays.coerceIn(0f, 30f)
+        multiFleetPlanningSlotSpacingDays = multiFleetPlanningSlotSpacingDays.coerceIn(0f, 10f)
+
+        routeSearchMaxSourcesPerCommodity = routeSearchMaxSourcesPerCommodity.coerceIn(1, 50)
+        routeSearchMaxDestsPerCommodity = routeSearchMaxDestsPerCommodity.coerceIn(1, 50)
+        travelCacheMaxEntries = travelCacheMaxEntries.coerceIn(0, 100000)
 
         multiHopLookaheadDepth = multiHopLookaheadDepth.coerceIn(1, 3)
         multiHopBeamWidth = multiHopBeamWidth.coerceIn(1, 20)
@@ -142,6 +157,11 @@ object TIHConfig {
             multiFleetCoordinationEnabled = configJson.optBoolean("multiFleetCoordinationEnabled", true)
             multiFleetReservationExpiryDays = configJson.optDouble("multiFleetReservationExpiryDays", 60.0).toFloat()
             multiFleetReplanCooldownDays = configJson.optDouble("multiFleetReplanCooldownDays", 0.5).toFloat()
+            multiFleetPlanningSlotSpacingDays = configJson.optDouble("multiFleetPlanningSlotSpacingDays", 0.1).toFloat()
+
+            routeSearchMaxSourcesPerCommodity = configJson.optInt("routeSearchMaxSourcesPerCommodity", 8)
+            routeSearchMaxDestsPerCommodity = configJson.optInt("routeSearchMaxDestsPerCommodity", 8)
+            travelCacheMaxEntries = configJson.optInt("travelCacheMaxEntries", 5000)
 
             multiHopLookaheadDepth = configJson.optInt("multiHopLookaheadDepth", 2)
             multiHopBeamWidth = configJson.optInt("multiHopBeamWidth", 5)

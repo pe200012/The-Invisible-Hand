@@ -34,6 +34,13 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         const val MEM_KEY_COMMODITY_BLACKLIST = "\$tih_commodity_blacklist"
         const val MEM_KEY_MARKET_BLACKLIST = "\$tih_market_blacklist"
         const val MEM_KEY_OFFLOADED = "\$tih_offloaded"
+
+        private const val MEM_KEY_PLAN_SIZE = "\$tih_trade_plan_size"
+        private const val MEM_KEY_PLAN_INDEX = "\$tih_trade_plan_index"
+        private const val MEM_KEY_PLAN_SCORE = "\$tih_trade_plan_score"
+        private const val MEM_KEY_PLAN_DEBUG = "\$tih_trade_plan_debug"
+        private const val MEM_KEY_PLAN_LEG_PREFIX = "\$tih_trade_plan_leg"
+
         private const val SAFETY_FLAG_REASON = "tih_auto_trade_safety"
 
         const val DEFAULT_MIN_PROFIT_PER_DAY = 100f
@@ -81,6 +88,25 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             if (currentRoute == null) {
                 state = TradeState.EVALUATING
             }
+        }
+
+        // Restore plan data if mid-trade
+        if (state != TradeState.EVALUATING && state != TradeState.OFFLOADING) {
+            val restored = restorePlanFromMemory()
+            if (restored != null && currentRoute != null) {
+                val idx = restored.index.coerceIn(0, restored.plan.legs.size - 1)
+                val plannedLeg = restored.plan.legs[idx]
+                if (isSameLeg(plannedLeg, currentRoute!!)) {
+                    currentPlan = restored.plan
+                    planIndex = idx
+                } else {
+                    clearPlan()
+                }
+            } else {
+                clearPlan()
+            }
+        } else {
+            clearPlanMemory()
         }
 
         // Mark fleet as busy to prevent military diversion
@@ -151,13 +177,31 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             return
         }
 
+        val coordinator = TIHTradeCoordinator.get()
+        if (TIHConfig.multiFleetCoordinationEnabled && !coordinator.shouldReplanImmediately(fleet.id)) {
+            val idleMarket = findNearestAccessibleMarket()
+            fleet.clearAssignments()
+            if (idleMarket?.primaryEntity != null) {
+                fleet.addAssignment(
+                    FleetAssignment.ORBIT_PASSIVE,
+                    idleMarket.primaryEntity,
+                    1f,
+                    "Docked at ${idleMarket.name}, waiting to evaluate"
+                )
+                updateTaskText("Auto-trading: waiting to evaluate at ${idleMarket.name}", to = idleMarket.primaryEntity)
+            } else {
+                fleet.addAssignment(FleetAssignment.ORBIT_PASSIVE, fleet, 1f, "Waiting to evaluate")
+                updateTaskText("Auto-trading: waiting to evaluate")
+            }
+            return
+        }
+
         clearPlan()
         val plan = TradePlanCalculator.planTradePlan(fleet)
         var route = plan?.legs?.firstOrNull()
         if (route == null) {
             val credits = Global.getSector().playerFleet.cargo.credits.get()
             val sim = TradePlanSimState(credits)
-            val coordinator = TIHTradeCoordinator.get()
             val coordinationEnabled = TIHConfig.multiFleetCoordinationEnabled
             val budgetOverride = if (coordinationEnabled) {
                 coordinator.seedPlanningSimState(sim, excludeFleetId = fleet.id)
@@ -244,6 +288,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         if (plan != null && plan.legs.isNotEmpty()) {
             currentPlan = plan
             planIndex = 0
+            savePlanToMemory(plan, planIndex)
         }
 
         // Clear the budget wait notification flag when we successfully reserve a leg
@@ -276,6 +321,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     private fun clearPlan() {
         currentPlan = null
         planIndex = 0
+        clearPlanMemory()
     }
 
     private fun advancePlanAfterSale(currentMarket: MarketAPI): Boolean {
@@ -303,6 +349,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         }
 
         planIndex = nextIndex
+        savePlanIndexToMemory(planIndex)
         currentRoute = next
         saveRouteToMemory(next)
         state = TradeState.BUYING
@@ -799,9 +846,126 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         )
     }
 
+    private data class RestoredPlan(val plan: TradePlan, val index: Int)
+
+    private fun isSameLeg(planned: TradeRoute, current: TradeRoute): Boolean {
+        return planned.source.id == current.source.id
+            && planned.dest.id == current.dest.id
+            && planned.commodityId == current.commodityId
+            && planned.quantity == current.quantity
+    }
+
+    private fun planLegKey(legIndex: Int, suffix: String): String {
+        return "${MEM_KEY_PLAN_LEG_PREFIX}_${legIndex}_$suffix"
+    }
+
+    private fun clearPlanMemory() {
+        val mem = fleet.memoryWithoutUpdate
+        val size = mem.getFloat(MEM_KEY_PLAN_SIZE).toInt()
+        if (size > 0) {
+            for (i in 0 until size) {
+                mem.unset(planLegKey(i, "source"))
+                mem.unset(planLegKey(i, "dest"))
+                mem.unset(planLegKey(i, "commodity"))
+                mem.unset(planLegKey(i, "quantity"))
+                mem.unset(planLegKey(i, "expectedBuyCost"))
+                mem.unset(planLegKey(i, "expectedSellRevenue"))
+                mem.unset(planLegKey(i, "expectedProfit"))
+                mem.unset(planLegKey(i, "estimatedDays"))
+            }
+        }
+
+        mem.unset(MEM_KEY_PLAN_SIZE)
+        mem.unset(MEM_KEY_PLAN_INDEX)
+        mem.unset(MEM_KEY_PLAN_SCORE)
+        mem.unset(MEM_KEY_PLAN_DEBUG)
+    }
+
+    private fun savePlanIndexToMemory(index: Int) {
+        val mem = fleet.memoryWithoutUpdate
+        val size = mem.getFloat(MEM_KEY_PLAN_SIZE).toInt()
+        if (size <= 0) {
+            return
+        }
+        mem.set(MEM_KEY_PLAN_INDEX, index)
+    }
+
+    private fun savePlanToMemory(plan: TradePlan, index: Int) {
+        clearPlanMemory()
+        val mem = fleet.memoryWithoutUpdate
+        mem.set(MEM_KEY_PLAN_SIZE, plan.legs.size)
+        mem.set(MEM_KEY_PLAN_INDEX, index)
+        mem.set(MEM_KEY_PLAN_SCORE, plan.scorePerDay)
+        if (plan.debug.isNotBlank()) {
+            mem.set(MEM_KEY_PLAN_DEBUG, plan.debug)
+        }
+
+        for ((i, leg) in plan.legs.withIndex()) {
+            mem.set(planLegKey(i, "source"), leg.source.id)
+            mem.set(planLegKey(i, "dest"), leg.dest.id)
+            mem.set(planLegKey(i, "commodity"), leg.commodityId)
+            mem.set(planLegKey(i, "quantity"), leg.quantity)
+            mem.set(planLegKey(i, "expectedBuyCost"), leg.expectedBuyCost)
+            mem.set(planLegKey(i, "expectedSellRevenue"), leg.expectedSellRevenue)
+            mem.set(planLegKey(i, "expectedProfit"), leg.expectedProfit)
+            mem.set(planLegKey(i, "estimatedDays"), leg.estimatedDays)
+        }
+    }
+
+    private fun restorePlanFromMemory(): RestoredPlan? {
+        val mem = fleet.memoryWithoutUpdate
+        val size = mem.getFloat(MEM_KEY_PLAN_SIZE).toInt()
+        if (size <= 0) {
+            return null
+        }
+
+        val index = mem.getFloat(MEM_KEY_PLAN_INDEX).toInt().coerceAtLeast(0)
+        val score = mem.getFloat(MEM_KEY_PLAN_SCORE)
+        val debug = mem.getString(MEM_KEY_PLAN_DEBUG) ?: ""
+
+        val economy = Global.getSector().economy
+        val legs = ArrayList<TradeRoute>(size)
+        for (i in 0 until size) {
+            val sourceId = mem.getString(planLegKey(i, "source")) ?: return null
+            val destId = mem.getString(planLegKey(i, "dest")) ?: return null
+            val commodityId = mem.getString(planLegKey(i, "commodity")) ?: return null
+            val quantity = mem.getFloat(planLegKey(i, "quantity")).toInt()
+            val expectedBuyCost = mem.getFloat(planLegKey(i, "expectedBuyCost"))
+            val expectedSellRevenue = mem.getFloat(planLegKey(i, "expectedSellRevenue"))
+            val expectedProfit = mem.getFloat(planLegKey(i, "expectedProfit"))
+            val estimatedDays = mem.getFloat(planLegKey(i, "estimatedDays"))
+
+            val source = economy.getMarket(sourceId) ?: return null
+            val dest = economy.getMarket(destId) ?: return null
+
+            legs.add(
+                TradeRoute(
+                    source = source,
+                    dest = dest,
+                    commodityId = commodityId,
+                    quantity = quantity,
+                    expectedProfit = expectedProfit,
+                    estimatedDays = estimatedDays,
+                    expectedBuyCost = expectedBuyCost,
+                    expectedSellRevenue = expectedSellRevenue
+                )
+            )
+        }
+
+        if (legs.isEmpty()) {
+            return null
+        }
+
+        return RestoredPlan(
+            plan = TradePlan(legs = legs, scorePerDay = score, debug = debug),
+            index = index.coerceIn(0, legs.size - 1)
+        )
+    }
+
     fun cleanup() {
         // Clear coordination state (reservations/budget locks)
         TIHTradeCoordinator.get().clearFleetState(fleet.id)
+        clearPlanMemory()
         clearAutoTradeSafetyFlags()
         fleet.memoryWithoutUpdate.unset(MEM_KEY_STATE)
         fleet.memoryWithoutUpdate.unset(MEM_KEY_COMMODITY)
