@@ -9,5 +9,6 @@ data class TradeRoute(
     val quantity: Int,
     val expectedProfit: Float,
     val estimatedDays: Float,
-    val expectedBuyCost: Float = 0f
+    val expectedBuyCost: Float = 0f,
+    val expectedSellRevenue: Float = 0f
 )

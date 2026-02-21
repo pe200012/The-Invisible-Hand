@@ -28,6 +28,28 @@ maxCreditsUsagePercent (default: 100)
   - 0 = disables buying by budget
   - Recommended range: 30-80 for safer reserve management
 
+multiHopLookaheadDepth (default: 2)
+  - Number of trade hops to plan ahead (1-3)
+  - 1 = single-leg planning (legacy behavior)
+  - 2 = recommended for better positioning
+  - 3 = best quality but heavier CPU
+
+multiHopBeamWidth (default: 5)
+  - Beam search width: number of partial plans kept per depth
+  - Higher = smarter planning, more CPU
+
+multiHopCandidatesPerHop (default: 5)
+  - Top candidate legs expanded at each step
+  - Higher = smarter planning, more CPU
+
+multiHopFutureDiscountPerHop (default: 0.85)
+  - Discount applied to later hops (0-1)
+  - Lower = prefer immediate profit over distant opportunities
+
+multiHopUncertaintyPenaltyPerDay (default: 0.03)
+  - Additional uncertainty discount based on travel days (0-1)
+  - Higher = more conservative about long travel legs
+
 ================================================================================
 QUANTITY SCALING
 ================================================================================
@@ -76,6 +98,8 @@ Total possible bonus: ~32.5% if all conditions are met
 ================================================================================
 MARKET IMPACT PENALTY
 ================================================================================
+
+NOTE: This section is deprecated and currently not used for route selection.
 
 Discourages over-trading the same routes.
 

@@ -54,6 +54,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
     private val interval = IntervalUtil(0.5f, 1.0f)
     private var state = TradeState.OFFLOADING
     private var currentRoute: TradeRoute? = null
+    private var currentPlan: TradePlan? = null
+    private var planIndex = 0
+    private var lastSellRerouteTimestamp = -1L
 
     init {
         // Restore state from fleet memory if resuming from save
@@ -123,9 +126,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
         when (state) {
             TradeState.OFFLOADING -> offload()
             TradeState.EVALUATING -> evaluate()
-            TradeState.TRAVELING_TO_BUY -> checkArrival(TradeState.BUYING)
+            TradeState.TRAVELING_TO_BUY -> travelingToBuyTick()
             TradeState.BUYING -> buy()
-            TradeState.TRAVELING_TO_SELL -> checkArrival(TradeState.SELLING)
+            TradeState.TRAVELING_TO_SELL -> travelingToSellTick()
             TradeState.SELLING -> sell()
         }
     }
@@ -140,7 +143,9 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             return
         }
 
-        val route = TradeRouteCalculator.findBestRoute(fleet)
+        clearPlan()
+        val plan = TradePlanCalculator.planTradePlan(fleet)
+        val route = plan?.legs?.firstOrNull() ?: TradeRouteCalculator.findBestRoute(fleet)
         if (route == null) {
             // No profitable route found - dock at nearby market and retry next interval
             val idleMarket = findNearestAccessibleMarket()
@@ -172,6 +177,11 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             return
         }
 
+        if (plan != null && plan.legs.isNotEmpty()) {
+            currentPlan = plan
+            planIndex = 0
+        }
+
         // Clear the notification flag when route is found
         fleet.memoryWithoutUpdate.unset("\$tih_no_route_notified")
 
@@ -193,6 +203,176 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             "Auto-trading: buying $commodityName at ${route.source.name}",
             from = fleet,
             to = sourceEntity
+        )
+    }
+
+    private fun clearPlan() {
+        currentPlan = null
+        planIndex = 0
+    }
+
+    private fun advancePlanAfterSale(currentMarket: MarketAPI): Boolean {
+        val plan = currentPlan ?: return false
+        val nextIndex = planIndex + 1
+        if (nextIndex >= plan.legs.size) {
+            clearPlan()
+            return false
+        }
+
+        val next = plan.legs[nextIndex]
+        if (next.source.id != currentMarket.id) {
+            // Plan no longer matches reality (sell reroute or external changes)
+            clearPlan()
+            return false
+        }
+
+        planIndex = nextIndex
+        currentRoute = next
+        saveRouteToMemory(next)
+        state = TradeState.BUYING
+        saveStateToMemory()
+        buy()
+        return true
+    }
+
+    private fun replanNow(reason: String) {
+        Global.getLogger(this::class.java).info("${fleet.name}: Replanning trade routes ($reason)")
+        TradeRouteCalculator.invalidateCache()
+        clearPlan()
+        currentRoute = null
+        state = TradeState.EVALUATING
+        saveStateToMemory()
+        evaluate()
+    }
+
+    private fun travelingToBuyTick() {
+        val route = currentRoute ?: run {
+            state = TradeState.EVALUATING
+            saveStateToMemory()
+            return
+        }
+
+        val source = route.source
+        val dest = route.dest
+
+        if (source.isHidden || !source.hasSubmarket(Submarkets.SUBMARKET_OPEN) || fleet.faction.isHostileTo(source.faction)) {
+            replanNow("source market became inaccessible")
+            return
+        }
+        if (dest.isHidden || !dest.hasSubmarket(Submarkets.SUBMARKET_OPEN) || fleet.faction.isHostileTo(dest.faction)) {
+            replanNow("destination market became inaccessible")
+            return
+        }
+
+        // If market flow changed, it's safer to replan than to force a stale trade.
+        val sourceExcess = source.getCommodityData(route.commodityId).excessQuantity
+        val destDeficit = dest.getCommodityData(route.commodityId).deficitQuantity
+        if (sourceExcess <= 0 || destDeficit <= 0) {
+            replanNow("market flow vanished (excess/deficit)")
+            return
+        }
+
+        val playerCredits = Global.getSector().playerFleet.cargo.credits.get()
+        val usableCredits = playerCredits * (TIHConfig.maxCreditsUsagePercent / 100f)
+        val buyPrice = source.getSupplyPrice(route.commodityId, route.quantity.toDouble(), true)
+        if (buyPrice > usableCredits) {
+            replanNow("buy exceeds configured credit cap")
+            return
+        }
+        if (route.expectedBuyCost > 0f && buyPrice > route.expectedBuyCost * 1.2f) {
+            replanNow("buy price spike vs plan")
+            return
+        }
+
+        checkArrival(TradeState.BUYING)
+    }
+
+    private fun travelingToSellTick() {
+        val route = currentRoute ?: run {
+            state = TradeState.EVALUATING
+            saveStateToMemory()
+            return
+        }
+
+        val dest = route.dest
+        if (dest.isHidden || !dest.hasSubmarket(Submarkets.SUBMARKET_OPEN) || fleet.faction.isHostileTo(dest.faction)) {
+            attemptSellReroute(route, "destination market became inaccessible")
+            checkArrival(TradeState.SELLING)
+            return
+        }
+
+        val actualQty = fleet.cargo.getCommodityQuantity(route.commodityId)
+        if (actualQty <= 0f) {
+            replanNow("cargo missing while traveling to sell")
+            return
+        }
+        val sellQty = actualQty.coerceAtMost(route.quantity.toFloat())
+        val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
+        if (buyCost > 0f) {
+            val sellPrice = dest.getDemandPrice(route.commodityId, sellQty.toDouble(), true)
+            val profit = sellPrice - buyCost
+            if (profit < -buyCost * 0.1f) {
+                attemptSellReroute(route, "expected significant loss at destination")
+            }
+        }
+
+        checkArrival(TradeState.SELLING)
+    }
+
+    private fun attemptSellReroute(route: TradeRoute, reason: String) {
+        val buyCost = fleet.memoryWithoutUpdate.getFloat(MEM_KEY_BUY_COST)
+        val actualQty = fleet.cargo.getCommodityQuantity(route.commodityId)
+        val sellQty = actualQty.coerceAtMost(route.quantity.toFloat())
+        if (sellQty <= 0f) {
+            return
+        }
+
+        val clock = Global.getSector().clock
+        if (lastSellRerouteTimestamp > 0L && clock.getElapsedDaysSince(lastSellRerouteTimestamp) < 2f) {
+            return
+        }
+
+        val best = TradeRouteCalculator.findBestSellDestinationForCargo(
+            fleet = fleet,
+            commodityId = route.commodityId,
+            quantity = sellQty,
+            buyCost = buyCost
+        )
+        if (best == null || best.dest.id == route.dest.id) {
+            return
+        }
+
+        clearPlan()
+        lastSellRerouteTimestamp = clock.timestamp
+
+        val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
+        Global.getLogger(this::class.java).info(
+            "${fleet.name}: Rerouting sale ($reason): ${route.dest.name} -> ${best.dest.name} (${commodityName} x${sellQty.toInt()})"
+        )
+
+        val newRoute = route.copy(
+            dest = best.dest,
+            expectedProfit = best.netProfit,
+            estimatedDays = best.estimatedDays,
+            expectedSellRevenue = best.revenue
+        )
+        currentRoute = newRoute
+        saveRouteToMemory(newRoute)
+
+        val destEntity = best.dest.primaryEntity ?: return
+        fleet.clearAssignments()
+        fleet.addAssignment(
+            FleetAssignment.GO_TO_LOCATION,
+            destEntity,
+            999f,
+            "Rerouting to sell $commodityName at ${best.dest.name}"
+        )
+        state = TradeState.TRAVELING_TO_SELL
+        saveStateToMemory()
+        updateTaskText(
+            "Auto-trading: selling $commodityName at ${best.dest.name}",
+            from = route.source.primaryEntity,
+            to = destEntity
         )
     }
 
@@ -238,18 +418,14 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             Global.getLogger(this::class.java).warn(
                 "${fleet.name}: Trade exceeds configured credit usage cap (${Misc.getDGSCredits(usableCredits)}), re-evaluating"
             )
-            state = TradeState.EVALUATING
-            currentRoute = null
-            saveStateToMemory()
+            replanNow("trade exceeds credit usage cap at source")
             return
         }
 
         if (playerCredits.get() < buyPrice) {
             // Can't afford - re-evaluate
             Global.getLogger(this::class.java).warn("${fleet.name}: Can't afford trade, re-evaluating")
-            state = TradeState.EVALUATING
-            currentRoute = null
-            saveStateToMemory()
+            replanNow("insufficient credits at source")
             return
         }
 
@@ -259,9 +435,7 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
                 Global.getLogger(this::class.java).warn(
                     "${fleet.name}: Buy price changed significantly, re-evaluating (was ~${route.expectedBuyCost.toInt()}, now ${buyPrice.toInt()})"
                 )
-                state = TradeState.EVALUATING
-                currentRoute = null
-                saveStateToMemory()
+                replanNow("buy price changed significantly at source")
                 return
             }
         }
@@ -327,14 +501,54 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
 
         // Check if this trade would result in a significant loss (more than 10% of buy cost)
         val profit = sellPrice - buyCost
-        if (profit < -buyCost * 0.1f) {
-            Global.getLogger(this::class.java).warn("${fleet.name}: Trade would result in significant loss (${profit.toInt()}¢), aborting sale and re-evaluating")
-            // Don't execute the trade, just clear cargo and re-evaluate
-            // This is a loss but better than selling at a huge loss
-            state = TradeState.EVALUATING
-            currentRoute = null
-            saveStateToMemory()
-            return
+        if (buyCost > 0f && profit < -buyCost * 0.1f) {
+            val best = TradeRouteCalculator.findBestSellDestinationForCargo(
+                fleet = fleet,
+                commodityId = route.commodityId,
+                quantity = sellQty,
+                buyCost = buyCost
+            )
+
+            if (best != null && best.dest.id != route.dest.id) {
+                clearPlan()
+
+                val commodityName = Global.getSector().economy.getCommoditySpec(route.commodityId)?.name ?: route.commodityId
+                Global.getLogger(this::class.java).warn(
+                    "${fleet.name}: Significant loss selling at ${route.dest.name} (${profit.toInt()}¢). Rerouting to ${best.dest.name} for salvage sale (${commodityName} x${sellQty.toInt()})."
+                )
+
+                val destEntity = best.dest.primaryEntity
+                if (destEntity != null) {
+                    val newRoute = route.copy(
+                        dest = best.dest,
+                        expectedProfit = best.netProfit,
+                        estimatedDays = best.estimatedDays,
+                        expectedSellRevenue = best.revenue
+                    )
+                    currentRoute = newRoute
+                    saveRouteToMemory(newRoute)
+
+                    fleet.clearAssignments()
+                    fleet.addAssignment(
+                        FleetAssignment.GO_TO_LOCATION,
+                        destEntity,
+                        999f,
+                        "Rerouting to sell $commodityName at ${best.dest.name}"
+                    )
+                    state = TradeState.TRAVELING_TO_SELL
+                    saveStateToMemory()
+                    updateTaskText(
+                        "Auto-trading: selling $commodityName at ${best.dest.name}",
+                        from = route.source.primaryEntity,
+                        to = destEntity
+                    )
+                    return
+                }
+            }
+
+            Global.getLogger(this::class.java).warn(
+                "${fleet.name}: Significant loss selling at ${route.dest.name} (${profit.toInt()}¢), but no better salvage market found; selling anyway"
+            )
         }
 
         // Execute sale
@@ -368,22 +582,17 @@ class TradeFleetScript(private val fleet: CampaignFleetAPI) : EveryFrameScript {
             netProfitColor = if (profit >= 0f) Misc.getPositiveHighlightColor() else Misc.getNegativeHighlightColor()
         )
 
-        // Attempt trade chaining immediately — avoid dead leg back to EVALUATING
-        val chainRoute = TradeRouteCalculator.findBestRouteFrom(fleet, route.dest)
-        if (chainRoute != null) {
-            currentRoute = chainRoute
-            saveRouteToMemory(chainRoute)
-            state = TradeState.BUYING
-            saveStateToMemory()
-            buy()
+        // Continue planned multi-hop route if possible
+        if (advancePlanAfterSale(route.dest)) {
             return
         }
 
-        // No chain found — fall through to EVALUATING
+        // No more planned legs — replan immediately
+        clearPlan()
         currentRoute = null
         state = TradeState.EVALUATING
         saveStateToMemory()
-        updateTaskText("Auto-trading: evaluating routes")
+        evaluate()
     }
 
     private fun ensureAutoTradeTask() {

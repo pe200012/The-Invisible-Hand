@@ -13,6 +13,18 @@ object TIHConfig {
     var maxCreditsUsagePercent = 100f
         internal set
 
+    // Multi-hop planning
+    var multiHopLookaheadDepth = 2
+        internal set
+    var multiHopBeamWidth = 5
+        internal set
+    var multiHopCandidatesPerHop = 5
+        internal set
+    var multiHopFutureDiscountPerHop = 0.85f
+        internal set
+    var multiHopUncertaintyPenaltyPerDay = 0.03f
+        internal set
+
     // Trade quantity scaling
     var quantityScalingQuadratic = 10
         internal set
@@ -63,6 +75,12 @@ object TIHConfig {
         cacheRefreshDays = cacheRefreshDays.coerceAtLeast(0.05f)
         maxCreditsUsagePercent = maxCreditsUsagePercent.coerceIn(0f, 100f)
 
+        multiHopLookaheadDepth = multiHopLookaheadDepth.coerceIn(1, 3)
+        multiHopBeamWidth = multiHopBeamWidth.coerceIn(1, 20)
+        multiHopCandidatesPerHop = multiHopCandidatesPerHop.coerceIn(1, 20)
+        multiHopFutureDiscountPerHop = multiHopFutureDiscountPerHop.coerceIn(0f, 1f)
+        multiHopUncertaintyPenaltyPerDay = multiHopUncertaintyPenaltyPerDay.coerceIn(0f, 1f)
+
         quantityScalingQuadratic = quantityScalingQuadratic.coerceAtLeast(0)
         quantityScalingLinear = quantityScalingLinear.coerceAtLeast(0)
 
@@ -109,6 +127,12 @@ object TIHConfig {
             minProfitPerDay = configJson.optDouble("minProfitPerDay", 100.0).toFloat()
             cacheRefreshDays = configJson.optDouble("cacheRefreshDays", 1.0).toFloat()
             maxCreditsUsagePercent = configJson.optDouble("maxCreditsUsagePercent", 100.0).toFloat()
+
+            multiHopLookaheadDepth = configJson.optInt("multiHopLookaheadDepth", 2)
+            multiHopBeamWidth = configJson.optInt("multiHopBeamWidth", 5)
+            multiHopCandidatesPerHop = configJson.optInt("multiHopCandidatesPerHop", 5)
+            multiHopFutureDiscountPerHop = configJson.optDouble("multiHopFutureDiscountPerHop", 0.85).toFloat()
+            multiHopUncertaintyPenaltyPerDay = configJson.optDouble("multiHopUncertaintyPenaltyPerDay", 0.03).toFloat()
 
             // Trade quantity scaling
             val quantityScaling = configJson.optJSONObject("quantityScaling")

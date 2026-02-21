@@ -17,6 +17,12 @@ object TIHLunaConfig {
     private const val KEY_CACHE_REFRESH_DAYS = "tih_cacheRefreshDays"
     private const val KEY_MAX_CREDITS_USAGE_PERCENT = "tih_maxCreditsUsagePercent"
 
+    private const val KEY_MULTI_HOP_LOOKAHEAD_DEPTH = "tih_multiHopLookaheadDepth"
+    private const val KEY_MULTI_HOP_BEAM_WIDTH = "tih_multiHopBeamWidth"
+    private const val KEY_MULTI_HOP_CANDIDATES_PER_HOP = "tih_multiHopCandidatesPerHop"
+    private const val KEY_MULTI_HOP_FUTURE_DISCOUNT_PER_HOP = "tih_multiHopFutureDiscountPerHop"
+    private const val KEY_MULTI_HOP_UNCERTAINTY_PENALTY_PER_DAY = "tih_multiHopUncertaintyPenaltyPerDay"
+
     private const val KEY_QUANTITY_SCALING_QUADRATIC = "tih_quantityScalingQuadratic"
     private const val KEY_QUANTITY_SCALING_LINEAR = "tih_quantityScalingLinear"
 
@@ -79,6 +85,58 @@ object TIHLunaConfig {
             TIHConfig.maxCreditsUsagePercent.toDouble(),
             0.0,
             100.0,
+            TAB_ROUTING
+        )
+
+        LunaSettings.SettingsCreator.addHeader(MOD_ID, "tih_header_planning", "Multi-hop Planning", TAB_ROUTING)
+        LunaSettings.SettingsCreator.addInt(
+            MOD_ID,
+            KEY_MULTI_HOP_LOOKAHEAD_DEPTH,
+            "Lookahead Depth",
+            "Number of trade hops to plan ahead. Higher = smarter, slower.",
+            TIHConfig.multiHopLookaheadDepth,
+            1,
+            3,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addInt(
+            MOD_ID,
+            KEY_MULTI_HOP_BEAM_WIDTH,
+            "Beam Width",
+            "Number of partial plans kept per depth. Higher = better, slower.",
+            TIHConfig.multiHopBeamWidth,
+            1,
+            20,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addInt(
+            MOD_ID,
+            KEY_MULTI_HOP_CANDIDATES_PER_HOP,
+            "Candidates Per Hop",
+            "Top candidate legs expanded at each step. Higher = better, slower.",
+            TIHConfig.multiHopCandidatesPerHop,
+            1,
+            20,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addDouble(
+            MOD_ID,
+            KEY_MULTI_HOP_FUTURE_DISCOUNT_PER_HOP,
+            "Future Hop Discount",
+            "Discount applied to later hops (0-1). Lower = prefer immediate profit.",
+            TIHConfig.multiHopFutureDiscountPerHop.toDouble(),
+            0.0,
+            1.0,
+            TAB_ROUTING
+        )
+        LunaSettings.SettingsCreator.addDouble(
+            MOD_ID,
+            KEY_MULTI_HOP_UNCERTAINTY_PENALTY_PER_DAY,
+            "Uncertainty Penalty Per Day",
+            "Additional uncertainty discount based on travel days.",
+            TIHConfig.multiHopUncertaintyPenaltyPerDay.toDouble(),
+            0.0,
+            0.2,
             TAB_ROUTING
         )
         LunaSettings.SettingsCreator.addInt(
@@ -245,6 +303,12 @@ object TIHLunaConfig {
         TIHConfig.minProfitPerDay = LunaSettings.getDouble(MOD_ID, KEY_MIN_PROFIT_PER_DAY)?.toFloat() ?: TIHConfig.minProfitPerDay
         TIHConfig.cacheRefreshDays = LunaSettings.getDouble(MOD_ID, KEY_CACHE_REFRESH_DAYS)?.toFloat() ?: TIHConfig.cacheRefreshDays
         TIHConfig.maxCreditsUsagePercent = LunaSettings.getDouble(MOD_ID, KEY_MAX_CREDITS_USAGE_PERCENT)?.toFloat() ?: TIHConfig.maxCreditsUsagePercent
+
+        TIHConfig.multiHopLookaheadDepth = LunaSettings.getInt(MOD_ID, KEY_MULTI_HOP_LOOKAHEAD_DEPTH) ?: TIHConfig.multiHopLookaheadDepth
+        TIHConfig.multiHopBeamWidth = LunaSettings.getInt(MOD_ID, KEY_MULTI_HOP_BEAM_WIDTH) ?: TIHConfig.multiHopBeamWidth
+        TIHConfig.multiHopCandidatesPerHop = LunaSettings.getInt(MOD_ID, KEY_MULTI_HOP_CANDIDATES_PER_HOP) ?: TIHConfig.multiHopCandidatesPerHop
+        TIHConfig.multiHopFutureDiscountPerHop = LunaSettings.getDouble(MOD_ID, KEY_MULTI_HOP_FUTURE_DISCOUNT_PER_HOP)?.toFloat() ?: TIHConfig.multiHopFutureDiscountPerHop
+        TIHConfig.multiHopUncertaintyPenaltyPerDay = LunaSettings.getDouble(MOD_ID, KEY_MULTI_HOP_UNCERTAINTY_PENALTY_PER_DAY)?.toFloat() ?: TIHConfig.multiHopUncertaintyPenaltyPerDay
 
         TIHConfig.quantityScalingQuadratic = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_QUADRATIC) ?: TIHConfig.quantityScalingQuadratic
         TIHConfig.quantityScalingLinear = LunaSettings.getInt(MOD_ID, KEY_QUANTITY_SCALING_LINEAR) ?: TIHConfig.quantityScalingLinear
