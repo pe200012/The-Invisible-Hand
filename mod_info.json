@@ -1,7 +1,7 @@
 {
     "id": "the_invisible_hand",
     "name": "The Invisible Hand",
-    "version": {"major": 0, "minor": 1, "patch": 0},
+    "version": {"major": 1, "minor": 0, "patch": 0},
     "description": "Auto-trading for Nexerelin special task groups",
     "gameVersion": "0.98a-RC8",
     "jars": ["jars/TheInvisibleHand.jar"],
