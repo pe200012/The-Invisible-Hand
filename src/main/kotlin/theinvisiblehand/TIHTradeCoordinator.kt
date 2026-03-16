@@ -2,7 +2,6 @@ package theinvisiblehand
 
 import com.fs.starfarer.api.Global
 import java.io.Serializable
-import java.util.ArrayDeque
 import kotlin.math.max
 import kotlin.math.min
 
@@ -49,30 +48,10 @@ class TIHTradeCoordinator private constructor() : Serializable {
     private val lockedBuyCostByFleet: MutableMap<String, Float> = HashMap()
     private val lastReplanTimestampByFleet: MutableMap<String, Long> = HashMap()
 
-    private val budgetQueue: ArrayDeque<String> = ArrayDeque()
-    private val budgetQueueSet: MutableSet<String> = HashSet()
+    private val budgetQueue = PlanningBudgetQueue()
     private var nextPlanningPermitTimestamp: Long = -1L
 
     private fun nowTimestamp(): Long = Global.getSector().clock.timestamp
-
-    private fun ensureInBudgetQueue(fleetId: String) {
-        if (!budgetQueueSet.add(fleetId)) {
-            return
-        }
-        budgetQueue.addLast(fleetId)
-    }
-
-    private fun removeFromBudgetQueue(fleetId: String) {
-        if (!budgetQueueSet.remove(fleetId)) {
-            return
-        }
-        budgetQueue.remove(fleetId)
-    }
-
-    private fun rotateBudgetQueue() {
-        val head = budgetQueue.pollFirst() ?: return
-        budgetQueue.addLast(head)
-    }
 
     private fun pruneExpiredInternal() {
         if (!TIHConfig.multiFleetCoordinationEnabled) {
@@ -161,15 +140,14 @@ class TIHTradeCoordinator private constructor() : Serializable {
             return false
         }
 
-        ensureInBudgetQueue(fleetId)
-        if (budgetQueue.peekFirst() != fleetId) {
+        if (!budgetQueue.requestTurn(fleetId)) {
             return false
         }
 
         val availableBudget = getAvailableBuyBudgetCredits(excludeFleetIdReservation = null)
         if (expectedCost > availableBudget) {
             // Yield turn if this fleet's chosen trade doesn't fit current budget.
-            rotateBudgetQueue()
+            budgetQueue.onInsufficientBudget(fleetId)
             return false
         }
 
@@ -185,8 +163,8 @@ class TIHTradeCoordinator private constructor() : Serializable {
             lastUpdatedTimestamp = now
         )
 
-        // Fairness: rotate after successful reservation.
-        rotateBudgetQueue()
+        // A fleet that already secured a reservation should leave the planning queue.
+        budgetQueue.onReservationSucceeded(fleetId)
         return true
     }
 
@@ -196,6 +174,9 @@ class TIHTradeCoordinator private constructor() : Serializable {
     }
 
     fun restoreFleetStateFromMemory(fleetId: String, route: TradeRoute?, buyCost: Float) {
+        // Active fleets should never stay in the planning queue after load.
+        budgetQueue.remove(fleetId)
+
         if (route == null) {
             lockedBuyCostByFleet.remove(fleetId)
             reservationsByFleet.remove(fleetId)
@@ -319,13 +300,14 @@ class TIHTradeCoordinator private constructor() : Serializable {
     fun onSellOrOffloadComplete(fleetId: String) {
         lockedBuyCostByFleet.remove(fleetId)
         reservationsByFleet.remove(fleetId)
+        budgetQueue.remove(fleetId)
     }
 
     fun clearFleetState(fleetId: String) {
         lockedBuyCostByFleet.remove(fleetId)
         reservationsByFleet.remove(fleetId)
         lastReplanTimestampByFleet.remove(fleetId)
-        removeFromBudgetQueue(fleetId)
+        budgetQueue.remove(fleetId)
     }
 
     fun shouldReplanImmediately(fleetId: String): Boolean {
