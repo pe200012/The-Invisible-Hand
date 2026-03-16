@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.1
+### Fixed
+- Fixed bug where multiple auto-trading fleets would get stuck "waiting for global budget"
+  - Replaced ad-hoc queue management with dedicated `PlanningBudgetQueue` class
+  - Fleets now leave planning queue immediately after successful reservation instead of remaining at queue head
+  - Budget exhaustion now rotates queue head to next waiting fleet instead of blocking indefinitely
+  - Added regression tests
+
 ## v1.0.0
 ### Added
 - Optional LunaLib integration: in-game configuration UI with live updates
