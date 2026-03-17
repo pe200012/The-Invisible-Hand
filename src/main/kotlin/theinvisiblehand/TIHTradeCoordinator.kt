@@ -48,8 +48,13 @@ class TIHTradeCoordinator private constructor() : Serializable {
     private val lockedBuyCostByFleet: MutableMap<String, Float> = HashMap()
     private val lastReplanTimestampByFleet: MutableMap<String, Long> = HashMap()
 
-    private val budgetQueue = PlanningBudgetQueue()
+    private var budgetQueue = PlanningBudgetQueue()
     private var nextPlanningPermitTimestamp: Long = -1L
+
+    internal fun resetPlanningRuntimeState() {
+        budgetQueue = PlanningBudgetQueue()
+        nextPlanningPermitTimestamp = -1L
+    }
 
     private fun nowTimestamp(): Long = Global.getSector().clock.timestamp
 

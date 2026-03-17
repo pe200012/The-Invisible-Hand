@@ -18,6 +18,9 @@ class InvisibleHandModPlugin : BaseModPlugin() {
     }
 
     override fun onGameLoad(newGame: Boolean) {
+        // Reset ephemeral planning-queue state so upgraded saves don't keep stale/incompatible queue data.
+        TIHTradeCoordinator.get().resetPlanningRuntimeState()
+
         // Re-attach TradeFleetScript to any fleets that were trading when saved
         for (location in Global.getSector().allLocations) {
             for (fleet in location.fleets) {
