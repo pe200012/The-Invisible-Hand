@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.2
+### Fixed
+- Fixed crash when stopping auto-trade on saves upgraded to v1.0.1
+  - Reset transient planning queue state on game load to discard stale or incompatible saved queue data
+  - Prevents `PlanningBudgetQueue.remove()` null crash during cleanup/stop-auto-trade flow
+
 ## v1.0.1
 ### Fixed
 - Fixed bug where multiple auto-trading fleets would get stuck "waiting for global budget"
